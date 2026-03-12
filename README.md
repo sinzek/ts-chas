@@ -1,6 +1,6 @@
 # chas
 
-`chas` brings functional/monadic error handling to your TypeScript projects, inspired by Rust's `Result` type. It handles both synchronous and asynchronous operations cleanly without throwing exceptions, and supports powerful result chaining.
+`chas` brings functional/monadic error handling to your TypeScript projects, inspired by Rust's `Result` type and libraries like `fp-ts`. It handles both synchronous and asynchronous operations cleanly without throwing exceptions, and supports powerful result chaining. It also includes tagged error handling with `errors()` and exhaustive or non-exhaustive matching.
 
 ## Overview
 
@@ -194,9 +194,11 @@ async function fetchUser(id: number): Promise<chas.Result<User, Error>> {
     > **Note:** When passing a tuple containing results with `never`-typed parameters (e.g. bare `chas.ok()` or `chas.err()`), the inferred types may degrade to `any`. This is a known TypeScript limitation with complex recursive types. Results with concrete `T` and `E` types infer correctly.
 
 - `chas.allAsync(iterable)`: Takes an iterable of `ResultAsync`s or Promises of Results. Resolves to an array of values if all are `Ok`, or the first resolved `Err`.
+
     ```ts
     await chas.allAsync([fetch1(), fetch2()]);
     ```
+
     > **Note:** Same `never`-type inference limitation as `chas.all` applies to the tuple overload.
 
 - `chas.shape(record)`: Takes an object where values are `Result`s. Returns a single `Result` wrapping an object with the same keys mapped to their `Ok` values, or short-circuits to the first `Err`.
@@ -219,7 +221,7 @@ async function fetchUser(id: number): Promise<chas.Result<User, Error>> {
 
     ```ts
     chas.any([chas.err('a'), chas.ok(2), chas.err('c')]); // Ok(2)
-    chas.any([chas.err('a'), chas.err('b')]);              // Err(['a', 'b'])
+    chas.any([chas.err('a'), chas.err('b')]); // Err(['a', 'b'])
     ```
 
 - `chas.anyAsync(iterable)`: Async version of `any`. Awaits all promises and returns the first `Ok`, or `Err` of all errors.
@@ -362,78 +364,69 @@ All `Result` objects have the following methods available:
 
 ### Tagged Errors
 
-Define typed, discriminated error unions and match on them exhaustively:
+Define typed, discriminated error unions and match on them with full type safety:
 
 ```ts
 // Define error types with factories
 const AppError = chas.errors({
-    NotFound:     (resource: string, id: string) => ({ resource, id }),
-    Validation:   (field: string, message: string) => ({ field, message }),
-    Unauthorized: () => ({}),
+	NotFound: (resource: string, id: string) => ({ resource, id }),
+	Validation: (field: string, message: string) => ({ field, message }),
+	Unauthorized: () => ({}),
 });
 
 // Extract the union type
 type AppError = chas.InferErrors<typeof AppError>;
 
-// Create instances — each has a `_tag` discriminant
-AppError.NotFound("user", "123");
-// → { _tag: "NotFound", resource: "user", id: "123" }
+// Create instances — they are real Error objects with a `_tag` discriminant
+const err = AppError.NotFound('user', '123');
+// → Error { _tag: "NotFound", resource: "user", id: "123", stack: "...", name: "NotFound" }
 
 // Use with Result
 function getUser(id: string): chas.Result<User, AppError> {
-    if (!id) return chas.err(AppError.Validation("id", "required") as AppError);
-    return chas.ok(user);
+	if (!id) return chas.err(AppError.Validation('id', 'required'));
+	return chas.ok(user);
 }
 ```
 
-- `chas.errors(definitions)`: Creates tagged error factory functions. Each key becomes a `_tag` discriminant.
+- `chas.errors(definitions)`: Creates tagged error factory functions. Each key becomes a `_tag` discriminant. The resulting objects are real `Error` instances with stack traces.
 - `chas.InferErrors<typeof factories>`: Extracts the discriminated union type from factories.
-- `chas.matchError(error, handlers)`: Exhaustively matches on `_tag`. TypeScript enforces every variant is handled.
+- `chas.matchError(error, handlers)`: Exhaustively matches on `_tag`. TypeScript enforces every variant is handled and infers the return type from your handlers.
+- `chas.matchErrorPartial(error, handlers)`: Matches a subset of tags. Requires a `_` fallback.
 
     ```ts
-    chas.matchError(error, {
-        NotFound:     (e) => `${e.resource} not found`,
-        Validation:   (e) => `${e.field}: ${e.message}`,
-        Unauthorized: ()  => "unauthorized",
+    const message = chas.matchErrorPartial(error, {
+    	Validation: e => `Bad field ${e.field}`,
+    	_: e => `Unexpected error: ${e._tag}`,
     });
     ```
 
 - `chas.isErrorTag(error, tag)`: Type guard that narrows to a specific variant.
 
     ```ts
-    if (chas.isErrorTag(error, "NotFound")) {
-        error.resource; // narrowed to NotFound
+    if (chas.isErrorTag(error, 'NotFound')) {
+    	error.resource; // Narrowed to NotFound (resource, id are accessible)
     }
-    ```
-
-- `chas.matchErrorPartial(error, handlers)`: Matches a subset of tags. Requires a `_` fallback.
-
-    ```ts
-    chas.matchErrorPartial(error, {
-        Validation: (e) => `Bad field ${e.field}`,
-        _: (e) => `Unexpected error: ${e._tag}`,
-    });
     ```
 
 - `result.catchTag(tag, handler)`: Catches a specific error by tag, handles it (returning a recovery `Result`), and **removes it from the error union**.
 
     ```ts
-    const result = await fetchUser(id)
-        .catchTag('NotFound', (e) => chas.ok(GUEST_USER)); 
-    // result type is now Result<User, DbError | Unauthorized>
+    const result = await fetchUser(id).catchTag('NotFound', e => chas.ok(GUEST_USER));
+    // result type is now Result<User, DbError | Unauthorized> (NotFound is gone!)
     ```
 
 #### Native Error Support
+
 Errors created with `chas.errors()` are real `Error` instances. They include native stack traces and support standard properties like `name` and `message`.
 
 They also support **Error Wrapping** via the native `cause` property:
 
 ```ts
 const AppError = chas.errors({
-    Database: (query: string) => ({ query }),
-    Http: (status: number, cause: Error) => ({ status, cause })
+	Database: (query: string) => ({ query }),
+	Http: (status: number, cause: Error) => ({ status, cause }),
 });
 
-const err = AppError.Http(500, AppError.Database("SELECT *"));
-// err.cause points to the Database error instance
+const err = AppError.Http(500, AppError.Database('SELECT *'));
+// err.cause correctly references the low-level Database error instance
 ```
