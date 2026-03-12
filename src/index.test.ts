@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from 'vitest';
 import { chas } from './index.js';
 
@@ -47,6 +48,14 @@ describe('chas', () => {
 			expect(errResult.unwrapErr()).toBe('error');
 		});
 
+		it('asyncMap', async () => {
+			const okResult = await chas.ok(42).asyncMap(async v => v * 2);
+			expect(okResult.unwrap()).toBe(84);
+
+			const errResult = await chas.err<string, number>('error').asyncMap(async v => v * 2);
+			expect(errResult.unwrapErr()).toBe('error');
+		});
+
 		it('mapErr', () => {
 			const okResult = chas.ok<number, string>(42).mapErr(e => e.toUpperCase());
 			expect(okResult.unwrap()).toBe(42);
@@ -61,8 +70,18 @@ describe('chas', () => {
 		});
 
 		it('mapOrElse', () => {
-			expect(chas.ok(42).mapOrElse(() => 100, v => v * 2)).toBe(84);
-			expect(chas.err('error').mapOrElse(e => e.length, (v: number) => v * 2)).toBe(5);
+			expect(
+				chas.ok(42).mapOrElse(
+					() => 100,
+					v => v * 2
+				)
+			).toBe(84);
+			expect(
+				chas.err('error').mapOrElse(
+					e => e.length,
+					(v: number) => v * 2
+				)
+			).toBe(5);
 		});
 
 		it('and', () => {
@@ -80,16 +99,61 @@ describe('chas', () => {
 		});
 
 		it('andThen', () => {
-			expect(chas.ok(1).andThen(v => chas.ok(v + 1)).unwrap()).toBe(2);
-			expect(chas.ok<number, string>(1).andThen(() => chas.err('error')).unwrapErr()).toBe('error');
-			expect(chas.err<string, number>('error').andThen(v => chas.ok(v + 1)).unwrapErr()).toBe('error');
+			expect(
+				chas
+					.ok(1)
+					.andThen(v => chas.ok(v + 1))
+					.unwrap()
+			).toBe(2);
+			expect(
+				chas
+					.ok<number, string>(1)
+					.andThen(() => chas.err('error'))
+					.unwrapErr()
+			).toBe('error');
+			expect(
+				chas
+					.err<string, number>('error')
+					.andThen(v => chas.ok(v + 1))
+					.unwrapErr()
+			).toBe('error');
+		});
+
+		it('asyncAndThen', async () => {
+			expect((await chas.ok(1).asyncAndThen(v => chas.okAsync(v + 1))).unwrap()).toBe(2);
+			expect((await chas.ok<number, string>(1).asyncAndThen(() => chas.errAsync('error'))).unwrapErr()).toBe(
+				'error'
+			);
+			expect((await chas.err<string, number>('error').asyncAndThen(v => chas.okAsync(v + 1))).unwrapErr()).toBe(
+				'error'
+			);
 		});
 
 		it('orElse', () => {
-			expect(chas.ok(1).orElse(() => chas.ok(2)).unwrap()).toBe(1);
-			expect(chas.ok<number, string>(1).orElse(() => chas.err('error')).unwrap()).toBe(1);
-			expect(chas.err<string, number>('error1').orElse(() => chas.ok(2)).unwrap()).toBe(2);
-			expect(chas.err('error1').orElse(e => chas.err(e + ' modified')).unwrapErr()).toBe('error1 modified');
+			expect(
+				chas
+					.ok(1)
+					.orElse(() => chas.ok(2))
+					.unwrap()
+			).toBe(1);
+			expect(
+				chas
+					.ok<number, string>(1)
+					.orElse(() => chas.err('error'))
+					.unwrap()
+			).toBe(1);
+			expect(
+				chas
+					.err<string, number>('error1')
+					.orElse(() => chas.ok(2))
+					.unwrap()
+			).toBe(2);
+			expect(
+				chas
+					.err('error1')
+					.orElse(e => chas.err(e + ' modified'))
+					.unwrapErr()
+			).toBe('error1 modified');
 		});
 
 		it('unwrap', () => {
@@ -147,23 +211,110 @@ describe('chas', () => {
 		});
 
 		it('inspect', () => {
-			let val = 0;
-			const res = chas.ok(1).inspect(v => { val = v; });
-			expect(val).toBe(1);
-			expect(res.unwrap()).toBe(1);
+			let value = 0;
+			chas.ok(5).inspect(v => (value = v));
+			expect(value).toBe(5);
 
-			chas.err('error').inspect(() => { val = 2; });
-			expect(val).toBe(1); // Not called
+			let errValue = 0;
+			chas.err('error').inspect(v => (errValue = v));
+			expect(errValue).toBe(0);
+		});
+
+		it('asyncInspect', async () => {
+			let value = 0;
+			await chas.ok(5).asyncInspect(async v => {
+				value = v;
+			});
+			expect(value).toBe(5);
+
+			let errValue = 0;
+			await chas.err('error').asyncInspect(async v => {
+				errValue = v as unknown as number; // just cast or ignore it for none branch
+			});
+			expect(errValue).toBe(0);
 		});
 
 		it('inspectErr', () => {
-			let errStr = '';
-			const res = chas.err('error').inspectErr(e => { errStr = e; });
-			expect(errStr).toBe('error');
-			expect(res.unwrapErr()).toBe('error');
+			let value = '';
+			chas.err('error').inspectErr(e => (value = e));
+			expect(value).toBe('error');
 
-			chas.ok(1).inspectErr(() => { errStr = 'err2'; });
-			expect(errStr).toBe('error'); // Not called
+			let okValue = '';
+			chas.ok(5).inspectErr(e => (okValue = e));
+			expect(okValue).toBe('');
+		});
+
+		it('asyncInspectErr', async () => {
+			let value = '';
+			await chas.err('error').asyncInspectErr(async e => {
+				value = e;
+			});
+			expect(value).toBe('error');
+
+			let okValue = '';
+			await chas.ok(5).asyncInspectErr(async e => {
+				okValue = e as unknown as string;
+			});
+			expect(okValue).toBe('');
+		});
+
+		it('finally', () => {
+			let called = 0;
+			const res1 = chas.ok(1).finally(() => {
+				called++;
+			});
+			expect(called).toBe(1);
+			expect(res1.unwrap()).toBe(1);
+
+			const res2 = chas.err('error').finally(() => {
+				called++;
+			});
+			expect(called).toBe(2);
+			expect(res2.unwrapErr()).toBe('error');
+		});
+
+		it('filter', () => {
+			const res1 = chas.ok(20).filter(
+				v => v >= 18,
+				() => 'Too young'
+			);
+			expect(res1.unwrap()).toBe(20);
+
+			const res2 = chas.ok(15).filter(
+				v => v >= 18,
+				() => 'Too young'
+			);
+			expect(res2.unwrapErr()).toBe('Too young');
+
+			const res3 = chas.err('error').filter(
+				(v: number) => v >= 18,
+				() => 'Too young'
+			);
+			expect(res3.unwrapErr()).toBe('error');
+		});
+
+		it('flatten', () => {
+			const nestedOk = chas.ok(chas.ok(5));
+			expect(nestedOk.flatten().unwrap()).toBe(5);
+
+			const nestedErr = chas.ok(chas.err('error'));
+			expect(nestedErr.flatten().unwrapErr()).toBe('error');
+
+			const errOuter = chas.err('outer');
+			expect(errOuter.flatten().unwrapErr()).toBe('outer');
+
+			const notNested = chas.ok(5);
+			expect(notNested.flatten().unwrap()).toBe(5);
+		});
+
+		it('swap', () => {
+			const okSwapped = chas.ok(5).swap();
+			expect(okSwapped.isErr()).toBe(true);
+			expect(okSwapped.unwrapErr()).toBe(5);
+
+			const errSwapped = chas.err('error').swap();
+			expect(errSwapped.isOk()).toBe(true);
+			expect(errSwapped.unwrap()).toBe('error');
 		});
 	});
 
@@ -217,6 +368,46 @@ describe('chas', () => {
 			expect((await res3).unwrapErr()).toBe('error');
 		});
 
+		it('inspect', async () => {
+			let value = 0;
+			await chas.okAsync(5).inspect(v => {
+				value = v;
+			});
+			expect(value).toBe(5);
+
+			let errValue = 0;
+			await chas.errAsync('error').inspect(v => {
+				errValue = v as unknown as number;
+			});
+			expect(errValue).toBe(0);
+
+			let asyncVal = 0;
+			await chas.okAsync(5).inspect(async v => {
+				asyncVal = v;
+			});
+			expect(asyncVal).toBe(5);
+		});
+
+		it('inspectErr', async () => {
+			let value = '';
+			await chas.errAsync('error').inspectErr(e => {
+				value = e;
+			});
+			expect(value).toBe('error');
+
+			let okValue = '';
+			await chas.okAsync(5).inspectErr(e => {
+				okValue = e as unknown as string;
+			});
+			expect(okValue).toBe('');
+
+			let asyncStr = '';
+			await chas.errAsync('error').inspectErr(async e => {
+				asyncStr = e;
+			});
+			expect(asyncStr).toBe('error');
+		});
+
 		it('match', async () => {
 			const res1 = await chas.okAsync(42).match({ ok: v => v * 2, err: () => 0 });
 			expect(res1).toBe(84);
@@ -224,14 +415,92 @@ describe('chas', () => {
 			const res2 = await chas.errAsync('error').match({ ok: () => 0, err: e => e.length });
 			expect(res2).toBe(5);
 		});
+
+		it('readSuspense', async () => {
+			let resolvePromise: (val: chas.Result<number, never>) => void;
+			const pendingPromise = new Promise<chas.Result<number, never>>(r => {
+				resolvePromise = r;
+			});
+
+			const resAsync = new chas.ResultAsync(pendingPromise);
+
+			// Should throw promise while pending
+			expect(() => resAsync.readSuspense()).toThrowError();
+			try {
+				resAsync.readSuspense();
+				expect.fail('Should have thrown');
+			} catch (thrown) {
+				expect(thrown).toBeInstanceOf(Promise);
+			}
+
+			// Resolve it
+			resolvePromise!(chas.ok(42));
+			await pendingPromise; // wait for microticks
+
+			// Delay to ensure next tick processes the `.then` state assignment correctly internally
+			await new Promise(r => setTimeout(r, 0));
+
+			expect(resAsync.readSuspense()).toBe(42);
+
+			const errAsync = chas.errAsync('test error');
+			await errAsync; // wait to resolve
+
+			// Same delay logic here
+			await new Promise(r => setTimeout(r, 0));
+
+			expect(() => errAsync.readSuspense()).toThrowError('test error');
+		});
+
+		it('swap', async () => {
+			const okSwapped = await chas.okAsync(5).swap();
+			expect(okSwapped.isErr()).toBe(true);
+			expect(okSwapped.unwrapErr()).toBe(5);
+
+			const errSwapped = await chas.errAsync('error').swap();
+			expect(errSwapped.isOk()).toBe(true);
+			expect(errSwapped.unwrap()).toBe('error');
+		});
+
+		it('fromSafePromise', async () => {
+			const res = await chas.ResultAsync.fromSafePromise(Promise.resolve(42));
+			expect(res.isOk()).toBe(true);
+			expect(res.unwrap()).toBe(42);
+
+			// Also test standalone export
+			const res2 = await chas.fromSafePromise(Promise.resolve('hello'));
+			expect(res2.unwrap()).toBe('hello');
+		});
+
+		it('defer', async () => {
+			let called = false;
+			const deferred = chas.ResultAsync.defer(() => {
+				called = true;
+				return chas.okAsync(42);
+			});
+
+			// fn should not have been called yet during synchronous execution
+			expect(called).toBe(false);
+
+			const result = await deferred;
+			expect(called).toBe(true);
+			expect(result.unwrap()).toBe(42);
+		});
 	});
 
 	describe('Utility Functions', () => {
 		it('tryCatch', () => {
-			const res1 = chas.tryCatch(() => 42, () => 'error');
+			const res1 = chas.tryCatch(
+				() => 42,
+				() => 'error'
+			);
 			expect(res1.unwrap()).toBe(42);
 
-			const res2 = chas.tryCatch(() => { throw new Error('fail'); }, e => (e as Error).message);
+			const res2 = chas.tryCatch(
+				() => {
+					throw new Error('fail');
+				},
+				e => (e as Error).message
+			);
 			expect(res2.unwrapErr()).toBe('fail');
 		});
 
@@ -239,57 +508,143 @@ describe('chas', () => {
 			const res1 = chas.all([chas.ok(1), chas.ok(2), chas.ok(3)]);
 			expect(res1.unwrap()).toEqual([1, 2, 3]);
 
-			const res2 = chas.all([
-				chas.ok(1),
-				chas.err('error'),
-				chas.ok(3)
-			] as chas.Result<number, string>[]);
+			const arr: chas.Result<number, string>[] = [chas.ok(1), chas.err('error'), chas.ok(3)];
+			const res2 = chas.all(arr);
 			expect(res2.unwrapErr()).toBe('error');
+
+			// Heterogeneous test
+			const res3 = chas.all([chas.ok(1), chas.ok('two')] as const);
+			// Under typescript, res3 is Result<[number, string], never>
+			expect(res3.unwrap()).toEqual([1, 'two']);
 		});
 
 		it('allAsync', async () => {
 			const res1 = await chas.allAsync([
 				chas.okAsync(1),
 				Promise.resolve(chas.ok(2)),
-				Promise.resolve(chas.ok(3))
-			] as Iterable<PromiseLike<chas.Result<number, never>>>);
+				Promise.resolve(chas.ok(3)),
+			]);
 			expect(res1.unwrap()).toEqual([1, 2, 3]);
 
-			const res2 = await chas.allAsync([
+			const arr: PromiseLike<chas.Result<number, string>>[] = [
 				chas.okAsync(1),
 				chas.errAsync('error'),
-				Promise.resolve(chas.ok(3))
-			] as Iterable<PromiseLike<chas.Result<number, string>>>);
+				Promise.resolve(chas.ok(3)),
+			];
+			const res2 = await chas.allAsync(arr);
 			expect(res2.unwrapErr()).toBe('error');
+
+			// Heterogeneous test
+			const res3 = await chas.allAsync([chas.okAsync(1), chas.okAsync('two')] as const);
+			// Under typescript, res3 is Result<[number, string], never>
+			expect(res3.unwrap()).toEqual([1, 'two']);
+		});
+
+		it('any', () => {
+			const arr: chas.Result<number, string>[] = [
+				chas.err('a'),
+				chas.ok(2),
+				chas.err('c'),
+			];
+			const res1 = chas.any(arr);
+			expect(res1.isOk()).toBe(true);
+			expect(res1.unwrap()).toBe(2);
+
+			const arr2: chas.Result<number, string>[] = [chas.err('a'), chas.err('b')];
+			const res2 = chas.any(arr2);
+			expect(res2.isErr()).toBe(true);
+			expect(res2.unwrapErr()).toEqual(['a', 'b']);
+
+			// All ok - returns first
+			const arr3: chas.Result<number, string>[] = [chas.ok(1), chas.ok(2)];
+			const res3 = chas.any(arr3);
+			expect(res3.unwrap()).toBe(1);
+		});
+
+		it('anyAsync', async () => {
+			const arr: PromiseLike<chas.Result<number, string>>[] = [
+				chas.errAsync('a'),
+				chas.okAsync(2),
+				chas.errAsync('c'),
+			];
+			const res1 = await chas.anyAsync(arr);
+			expect(res1.isOk()).toBe(true);
+			expect(res1.unwrap()).toBe(2);
+
+			const arr2: PromiseLike<chas.Result<number, string>>[] = [
+				chas.errAsync('a'),
+				chas.errAsync('b'),
+			];
+			const res2 = await chas.anyAsync(arr2);
+			expect(res2.isErr()).toBe(true);
+			expect(res2.unwrapErr()).toEqual(['a', 'b']);
+		});
+
+		it('collect', () => {
+			const arr: chas.Result<number, string>[] = [
+				chas.ok(1),
+				chas.err('a'),
+				chas.ok(3),
+				chas.err('b'),
+			];
+			const res1 = chas.collect(arr);
+			expect(res1.isErr()).toBe(true);
+			expect(res1.unwrapErr()).toEqual(['a', 'b']);
+
+			const arr2: chas.Result<number, string>[] = [chas.ok(1), chas.ok(2), chas.ok(3)];
+			const res2 = chas.collect(arr2);
+			expect(res2.isOk()).toBe(true);
+			expect(res2.unwrap()).toEqual([1, 2, 3]);
+		});
+
+		it('collectAsync', async () => {
+			const arr: PromiseLike<chas.Result<number, string>>[] = [
+				chas.okAsync(1),
+				chas.errAsync('a'),
+				chas.okAsync(3),
+				chas.errAsync('b'),
+			];
+			const res1 = await chas.collectAsync(arr);
+			expect(res1.isErr()).toBe(true);
+			expect(res1.unwrapErr()).toEqual(['a', 'b']);
+
+			const arr2: PromiseLike<chas.Result<number, string>>[] = [
+				chas.okAsync(1),
+				chas.okAsync(2),
+			];
+			const res2 = await chas.collectAsync(arr2);
+			expect(res2.isOk()).toBe(true);
+			expect(res2.unwrap()).toEqual([1, 2]);
 		});
 
 		it('withResult', () => {
-			const fn = chas.withResult((a: number, b: number) => {
-				if (b === 0) throw new Error('div by 0');
-				return a / b;
-			}, e => (e as Error).message);
+			const fn = chas.withResult(
+				(a: number, b: number) => {
+					if (b === 0) throw new Error('div by 0');
+					return a / b;
+				},
+				e => (e as Error).message
+			);
 
 			expect(fn(4, 2).unwrap()).toBe(2);
 			expect(fn(4, 0).unwrapErr()).toBe('div by 0');
 		});
 
 		it('withResultAsync', async () => {
-			const fn = chas.withResultAsync(async (a: number, b: number) => {
-				if (b === 0) throw new Error('div by 0');
-				return a / b;
-			}, e => (e as Error).message);
+			const fn = chas.withResultAsync(
+				async (a: number, b: number) => {
+					if (b === 0) throw new Error('div by 0');
+					return a / b;
+				},
+				e => (e as Error).message
+			);
 
 			expect((await fn(4, 2)).unwrap()).toBe(2);
 			expect((await fn(4, 0)).unwrapErr()).toBe('div by 0');
 		});
 
 		it('partition', () => {
-			const results = [
-				chas.ok(1),
-				chas.err('e1'),
-				chas.ok(2),
-				chas.err('e2')
-			] as chas.Result<number, string>[];
+			const results = [chas.ok(1), chas.err('e1'), chas.ok(2), chas.err('e2')] as chas.Result<number, string>[];
 			const { oks, errs } = chas.partition(results);
 			expect(oks).toEqual([1, 2]);
 			expect(errs).toEqual(['e1', 'e2']);
@@ -300,11 +655,294 @@ describe('chas', () => {
 				chas.okAsync(1),
 				Promise.resolve(chas.err('e1')),
 				Promise.resolve(chas.ok(2)),
-				chas.errAsync('e2')
+				chas.errAsync('e2'),
 			] as Iterable<PromiseLike<chas.Result<number, string>>>;
 			const { oks, errs } = await chas.partitionAsync(promises);
 			expect(oks).toEqual([1, 2]);
 			expect(errs).toEqual(['e1', 'e2']);
+		});
+
+		it('withRetryAsync', async () => {
+			let attempts1 = 0;
+			const fetchSuccessOnThird = chas.withRetryAsync(
+				async () => {
+					attempts1++;
+					if (attempts1 < 3) throw new Error('fail');
+					return 'success';
+				},
+				{ retries: 3, delayMs: 10, onThrow: e => (e as Error).message }
+			);
+
+			const res1 = await fetchSuccessOnThird();
+			expect(res1.unwrap()).toBe('success');
+			expect(attempts1).toBe(3);
+
+			let attempts2 = 0;
+			const fetchAlwaysFail = chas.withRetryAsync(
+				async () => {
+					attempts2++;
+					throw new Error('fail');
+				},
+				{ retries: 2, delayMs: 10, onThrow: e => (e as Error).message }
+			);
+
+			const res2 = await fetchAlwaysFail();
+			expect(res2.unwrapErr()).toBe('fail');
+			expect(attempts2).toBe(3); // Initial attempt + 2 retries
+		});
+
+		it('shape', () => {
+			const successShape = chas.shape({
+				a: chas.ok(1) as chas.Result<number, string>,
+				b: chas.ok('two') as chas.Result<string, string>,
+				c: chas.ok(true) as chas.Result<boolean, string>,
+			});
+
+			expect(successShape.isOk()).toBe(true);
+			expect(successShape.unwrap()).toEqual({ a: 1, b: 'two', c: true });
+
+			const errShape = chas.shape({
+				a: chas.ok(1) as chas.Result<number, string>,
+				b: chas.err('fail') as chas.Result<number, string>,
+				c: chas.ok(3) as chas.Result<number, string>,
+			});
+
+			expect(errShape.isErr()).toBe(true);
+			expect(errShape.unwrapErr()).toBe('fail');
+		});
+
+		it('shapeAsync', async () => {
+			const successShape = await chas.shapeAsync({
+				a: chas.okAsync(1),
+				b: Promise.resolve(chas.ok('two')),
+				c: chas.fromPromise(Promise.resolve(true), () => false),
+			});
+
+			expect(successShape.isOk()).toBe(true);
+			const expectedObj = { a: 1, b: 'two', c: true };
+			expect(successShape.unwrap()).toEqual(expectedObj);
+
+			const errShape = await chas.shapeAsync({
+				a: chas.okAsync(1),
+				b: chas.errAsync('fail'),
+				c: chas.okAsync(3),
+			});
+
+			expect(errShape.isErr()).toBe(true);
+			expect(errShape.unwrapErr()).toBe('fail');
+		});
+
+		it('go (do-notation)', () => {
+			const successGo = chas.go(function* () {
+				const a = yield* chas.ok(5);
+				const b = yield* chas.ok(10);
+				return a + b;
+			});
+			expect(successGo.unwrap()).toBe(15);
+
+			let didExecuteAfterErr = false;
+
+			const errGo = chas.go(function* (): Generator<chas.Result<any, string>, number, any> {
+				const a = yield* chas.ok(5) as unknown as chas.Result<number, string>;
+
+				const b = yield* chas.err<string, any>('fail!');
+				didExecuteAfterErr = true;
+				return a + (b as number);
+			});
+
+			expect(errGo.unwrapErr()).toBe('fail!');
+			expect(didExecuteAfterErr).toBe(false);
+		});
+
+		it('go (async do-notation)', async () => {
+			const successAsyncGo = chas.go(function* () {
+				const a = yield* chas.okAsync(10);
+				const b = yield* chas.ok(5);
+				return a + b;
+			});
+
+			const res = await successAsyncGo;
+			expect(res.unwrap()).toBe(15);
+
+			let didExecuteAfterErrAsync = false;
+
+			const errAsyncGo = chas.go(function* (): Generator<chas.ResultAsync<any, string>, number, any> {
+				const a = yield* chas.errAsync<string, any>('fail!');
+				didExecuteAfterErrAsync = true;
+
+				const b = yield* chas.okAsync(5) as unknown as chas.ResultAsync<number, string>;
+				return (a as number) + b;
+			});
+
+			const errRes = await errAsyncGo;
+			expect(errRes.unwrapErr()).toBe('fail!');
+			expect(didExecuteAfterErrAsync).toBe(false);
+		});
+	});
+
+	describe('Tagged Errors', () => {
+		const TestError = chas.errors({
+			NotFound: (resource: string, id: string) => ({ resource, id }),
+			Validation: (field: string, message: string) => ({ field, message }),
+			Unauthorized: () => ({}),
+		});
+
+		type TestError = chas.InferErrors<typeof TestError>;
+
+		it('errors() creates tagged error objects', () => {
+			const e1 = TestError.NotFound('user', '123');
+			expect(e1._tag).toBe('NotFound');
+			expect(e1.resource).toBe('user');
+			expect(e1.id).toBe('123');
+
+			const e2 = TestError.Validation('email', 'invalid format');
+			expect(e2._tag).toBe('Validation');
+			expect(e2.field).toBe('email');
+			expect(e2.message).toBe('invalid format');
+
+			const e3 = TestError.Unauthorized();
+			expect(e3._tag).toBe('Unauthorized');
+		});
+
+		it('errors() works with Result', () => {
+			const result: chas.Result<string, TestError> = chas.err(TestError.NotFound('user', '123') as TestError);
+			expect(result.isErr()).toBe(true);
+			expect(result.unwrapErr()._tag).toBe('NotFound');
+		});
+
+		it('matchError() exhaustively matches tags', () => {
+			const err1 = TestError.NotFound('user', '123') as TestError;
+			const message1 = chas.matchError(err1, {
+				NotFound: (e) => `${e.resource} ${e.id} not found`,
+				Validation: (e) => `${e.field}: ${e.message}`,
+				Unauthorized: () => 'unauthorized',
+			});
+			expect(message1).toBe('user 123 not found');
+
+			const err2 = TestError.Validation('email', 'invalid') as TestError;
+			const message2 = chas.matchError(err2, {
+				NotFound: (e) => `${e.resource} not found`,
+				Validation: (e) => `${e.field}: ${e.message}`,
+				Unauthorized: () => 'unauthorized',
+			});
+			expect(message2).toBe('email: invalid');
+		});
+
+		it('isErrorTag() narrows the type', () => {
+			const err = TestError.NotFound('user', '123') as TestError;
+
+			if (chas.isErrorTag(err, 'NotFound')) {
+				expect(err.resource).toBe('user');
+				expect(err.id).toBe('123');
+			} else {
+				expect.fail('Should have matched NotFound');
+			}
+
+			const validationErr = TestError.Validation('email', 'bad') as TestError;
+			expect(chas.isErrorTag(validationErr, 'NotFound')).toBe(false);
+			expect(chas.isErrorTag(validationErr, 'Unauthorized')).toBe(false);
+		});
+
+		it('integrates with Result.match', () => {
+			function getUser(id: string): chas.Result<string, TestError> {
+				if (!id) return chas.err(TestError.Validation('id', 'required') as TestError);
+				if (id === 'missing') return chas.err(TestError.NotFound('user', id) as TestError);
+				return chas.ok(`User ${id}`);
+			}
+
+			const r1 = getUser('42').match({
+				ok: (v) => v,
+				err: (e) => chas.matchError(e, {
+					NotFound: (e) => `${e.resource} ${e.id} not found`,
+					Validation: (e) => `Bad ${e.field}: ${e.message}`,
+					Unauthorized: () => 'unauthorized',
+				}),
+			});
+			expect(r1).toBe('User 42');
+
+			const r2 = getUser('missing').match({
+				ok: (v) => v,
+				err: (e) => chas.matchError(e, {
+					NotFound: (e) => `${e.resource} ${e.id} not found`,
+					Validation: (e) => `Bad ${e.field}: ${e.message}`,
+					Unauthorized: () => 'unauthorized',
+				}),
+			});
+			expect(r2).toBe('user missing not found');
+		});
+
+		it('matchErrorPartial() matches subset with wildcard', () => {
+			const err = TestError.NotFound('user', '123') as TestError;
+			const msg = chas.matchErrorPartial(err, {
+				Validation: (e) => `Bad ${e.field}`,
+				_: (e) => `Fallback: ${e._tag}`,
+			});
+			expect(msg).toBe('Fallback: NotFound');
+
+			const msg2 = chas.matchErrorPartial(TestError.Validation('f', 'm') as TestError, {
+				Validation: (e) => `Bad ${e.field}`,
+				_: () => 'fallback',
+			});
+			expect(msg2).toBe('Bad f');
+		});
+
+		it('catchTag() peels off a specific error', () => {
+			const err = TestError.NotFound('user', '123') as TestError;
+			const res: chas.Result<string, TestError> = chas.err(err);
+
+			const caught = res.catchTag('NotFound', (e) => {
+				expect(e.resource).toBe('user');
+				return chas.ok('recovered');
+			});
+
+			type RemainingErrors = chas.ExtractErrError<typeof caught>;
+			// Check if NotFound is strictly gone from the type
+			const _typeCheck: Exclude<TestError, { _tag: 'NotFound' }> = {} as RemainingErrors;
+			expect(_typeCheck).toBeDefined();
+
+			// @ts-expect-error - NotFound should be excluded from the union now
+			const _shouldFail: RemainingErrors = TestError.NotFound('a', 'b');
+			expect(_shouldFail).toBeDefined();
+
+			expect(caught.isOk()).toBe(true);
+			expect(caught.unwrap()).toBe('recovered');
+
+			// Unmatched tags pass through
+			const res2: chas.Result<string, TestError> = chas.err(TestError.Validation('f', 'm') as TestError);
+			const missed = res2.catchTag('NotFound', () => chas.ok('nope'));
+			expect(missed.isErr()).toBe(true);
+			expect(missed.unwrapErr()._tag).toBe('Validation');
+		});
+
+		it('ResultAsync.catchTag() works asynchronously', async () => {
+			const res: chas.ResultAsync<string, TestError> = chas.errAsync(TestError.NotFound('u', 'i') as TestError);
+			const caught = await res.catchTag('NotFound', async (e) => {
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				return chas.ok(`recovered ${e.id}`);
+			});
+
+			expect(caught.isOk()).toBe(true);
+			expect(caught.unwrap()).toBe('recovered i');
+		});
+
+		it('errors() produces real Error instances with stack traces', () => {
+			const err = TestError.NotFound('user', '123');
+			expect(err instanceof Error).toBe(true);
+			expect(err.stack).toBeDefined();
+			expect(err.name).toBe('NotFound');
+			expect((err as any).message).toBe('[NotFound]');
+		});
+
+		it('supports error wrapping via cause', () => {
+			const root = new Error('root cause');
+			const AppError = chas.errors({
+				Wrapped: (cause: Error) => ({ cause }),
+			});
+
+			const err = AppError.Wrapped(root);
+			expect((err as any).cause).toBe(root);
+			// Native Error support check
+			expect((err as unknown as Error).cause).toBe(root);
 		});
 	});
 });
