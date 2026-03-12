@@ -1,6 +1,6 @@
 # chas
 
-`chas` brings functional/monadic error handling to your TypeScript projects, inspired by Rust's `Result` type and libraries like `fp-ts`. It handles both synchronous and asynchronous operations cleanly without throwing exceptions, and supports powerful result chaining. It also includes tagged error handling with `errors()` and exhaustive or non-exhaustive matching.
+`chas` brings functional/monadic error handling to your TypeScript projects, inspired by Rust's `Result` type and libraries like `fp-ts`. It handles both synchronous and asynchronous operations cleanly without throwing exceptions, and supports powerful result chaining. It also includes tagged error handling with `errors()` and exhaustive or non-exhaustive matching with `matchError()` and `matchErrorPartial()`.
 
 ## Overview
 
