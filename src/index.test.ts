@@ -541,11 +541,7 @@ describe('chas', () => {
 		});
 
 		it('any', () => {
-			const arr: chas.Result<number, string>[] = [
-				chas.err('a'),
-				chas.ok(2),
-				chas.err('c'),
-			];
+			const arr: chas.Result<number, string>[] = [chas.err('a'), chas.ok(2), chas.err('c')];
 			const res1 = chas.any(arr);
 			expect(res1.isOk()).toBe(true);
 			expect(res1.unwrap()).toBe(2);
@@ -571,22 +567,14 @@ describe('chas', () => {
 			expect(res1.isOk()).toBe(true);
 			expect(res1.unwrap()).toBe(2);
 
-			const arr2: PromiseLike<chas.Result<number, string>>[] = [
-				chas.errAsync('a'),
-				chas.errAsync('b'),
-			];
+			const arr2: PromiseLike<chas.Result<number, string>>[] = [chas.errAsync('a'), chas.errAsync('b')];
 			const res2 = await chas.anyAsync(arr2);
 			expect(res2.isErr()).toBe(true);
 			expect(res2.unwrapErr()).toEqual(['a', 'b']);
 		});
 
 		it('collect', () => {
-			const arr: chas.Result<number, string>[] = [
-				chas.ok(1),
-				chas.err('a'),
-				chas.ok(3),
-				chas.err('b'),
-			];
+			const arr: chas.Result<number, string>[] = [chas.ok(1), chas.err('a'), chas.ok(3), chas.err('b')];
 			const res1 = chas.collect(arr);
 			expect(res1.isErr()).toBe(true);
 			expect(res1.unwrapErr()).toEqual(['a', 'b']);
@@ -608,10 +596,7 @@ describe('chas', () => {
 			expect(res1.isErr()).toBe(true);
 			expect(res1.unwrapErr()).toEqual(['a', 'b']);
 
-			const arr2: PromiseLike<chas.Result<number, string>>[] = [
-				chas.okAsync(1),
-				chas.okAsync(2),
-			];
+			const arr2: PromiseLike<chas.Result<number, string>>[] = [chas.okAsync(1), chas.okAsync(2)];
 			const res2 = await chas.collectAsync(arr2);
 			expect(res2.isOk()).toBe(true);
 			expect(res2.unwrap()).toEqual([1, 2]);
@@ -813,16 +798,16 @@ describe('chas', () => {
 		it('matchError() exhaustively matches tags', () => {
 			const err1 = TestError.NotFound('user', '123') as TestError;
 			const message1 = chas.matchError(err1, {
-				NotFound: (e) => `${e.resource} ${e.id} not found`,
-				Validation: (e) => `${e.field}: ${e.message}`,
+				NotFound: e => `${e.resource} ${e.id} not found`,
+				Validation: e => `${e.field}: ${e.message}`,
 				Unauthorized: () => 'unauthorized',
 			});
 			expect(message1).toBe('user 123 not found');
 
 			const err2 = TestError.Validation('email', 'invalid') as TestError;
 			const message2 = chas.matchError(err2, {
-				NotFound: (e) => `${e.resource} not found`,
-				Validation: (e) => `${e.field}: ${e.message}`,
+				NotFound: e => `${e.resource} not found`,
+				Validation: e => `${e.field}: ${e.message}`,
 				Unauthorized: () => 'unauthorized',
 			});
 			expect(message2).toBe('email: invalid');
@@ -831,7 +816,7 @@ describe('chas', () => {
 		it('isErrorTag() narrows the type', () => {
 			const err = TestError.NotFound('user', '123') as TestError;
 
-			if (chas.isErrorTag(err, 'NotFound')) {
+			if (chas.isErrorWithTag(err, 'NotFound')) {
 				expect(err.resource).toBe('user');
 				expect(err.id).toBe('123');
 			} else {
@@ -839,8 +824,9 @@ describe('chas', () => {
 			}
 
 			const validationErr = TestError.Validation('email', 'bad') as TestError;
-			expect(chas.isErrorTag(validationErr, 'NotFound')).toBe(false);
-			expect(chas.isErrorTag(validationErr, 'Unauthorized')).toBe(false);
+			expect(chas.isErrorWithTag(validationErr, 'NotFound')).toBe(false);
+			expect(chas.isErrorWithTag(validationErr, 'Unauthorized')).toBe(false);
+			expect(chas.isErrorWithTag(validationErr, 'Validation')).toBe(true);
 		});
 
 		it('integrates with Result.match', () => {
@@ -851,22 +837,24 @@ describe('chas', () => {
 			}
 
 			const r1 = getUser('42').match({
-				ok: (v) => v,
-				err: (e) => chas.matchError(e, {
-					NotFound: (e) => `${e.resource} ${e.id} not found`,
-					Validation: (e) => `Bad ${e.field}: ${e.message}`,
-					Unauthorized: () => 'unauthorized',
-				}),
+				ok: v => v,
+				err: e =>
+					chas.matchError(e, {
+						NotFound: e => `${e.resource} ${e.id} not found`,
+						Validation: e => `Bad ${e.field}: ${e.message}`,
+						Unauthorized: () => 'unauthorized',
+					}),
 			});
 			expect(r1).toBe('User 42');
 
 			const r2 = getUser('missing').match({
-				ok: (v) => v,
-				err: (e) => chas.matchError(e, {
-					NotFound: (e) => `${e.resource} ${e.id} not found`,
-					Validation: (e) => `Bad ${e.field}: ${e.message}`,
-					Unauthorized: () => 'unauthorized',
-				}),
+				ok: v => v,
+				err: e =>
+					chas.matchError(e, {
+						NotFound: e => `${e.resource} ${e.id} not found`,
+						Validation: e => `Bad ${e.field}: ${e.message}`,
+						Unauthorized: () => 'unauthorized',
+					}),
 			});
 			expect(r2).toBe('user missing not found');
 		});
@@ -874,13 +862,13 @@ describe('chas', () => {
 		it('matchErrorPartial() matches subset with wildcard', () => {
 			const err = TestError.NotFound('user', '123') as TestError;
 			const msg = chas.matchErrorPartial(err, {
-				Validation: (e) => `Bad ${e.field}`,
-				_: (e) => `Fallback: ${e._tag}`,
+				Validation: e => `Bad ${e.field}`,
+				_: e => `Fallback: ${e._tag}`,
 			});
 			expect(msg).toBe('Fallback: NotFound');
 
 			const msg2 = chas.matchErrorPartial(TestError.Validation('f', 'm') as TestError, {
-				Validation: (e) => `Bad ${e.field}`,
+				Validation: e => `Bad ${e.field}`,
 				_: () => 'fallback',
 			});
 			expect(msg2).toBe('Bad f');
@@ -890,7 +878,7 @@ describe('chas', () => {
 			const err = TestError.NotFound('user', '123') as TestError;
 			const res: chas.Result<string, TestError> = chas.err(err);
 
-			const caught = res.catchTag('NotFound', (e) => {
+			const caught = res.catchTag('NotFound', e => {
 				expect(e.resource).toBe('user');
 				return chas.ok('recovered');
 			});
@@ -916,8 +904,8 @@ describe('chas', () => {
 
 		it('ResultAsync.catchTag() works asynchronously', async () => {
 			const res: chas.ResultAsync<string, TestError> = chas.errAsync(TestError.NotFound('u', 'i') as TestError);
-			const caught = await res.catchTag('NotFound', async (e) => {
-				await new Promise((resolve) => setTimeout(resolve, 0));
+			const caught = await res.catchTag('NotFound', async e => {
+				await new Promise(resolve => setTimeout(resolve, 0));
 				return chas.ok(`recovered ${e.id}`);
 			});
 

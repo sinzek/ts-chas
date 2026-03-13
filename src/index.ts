@@ -13,4 +13,7 @@
  *
  * @module @sinzek/chas
  */
-export * as chas from './result.js';
+/**
+ * Main library namespace containing all Result and Option types and utilities.
+ */
+export * as chas from './chas.js';

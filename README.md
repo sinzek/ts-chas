@@ -1,26 +1,20 @@
 # chas
 
-`chas` brings functional/monadic error handling to your TypeScript projects, inspired by Rust's `Result` type and libraries like `fp-ts`. It handles both synchronous and asynchronous operations cleanly without throwing exceptions, and supports powerful result chaining. It also includes tagged error handling with `errors()` and exhaustive or non-exhaustive matching with `matchError()` and `matchErrorPartial()`.
+`chas` is a production-grade functional error handling library for TypeScript, inspired by Rust's `Result` and `fp-ts`. It provides a robust alternative to `try/catch` by treating errors as values, enabling explicit, type-safe error handling for both synchronous and asynchronous workflows.
 
 ## Overview
 
-This library provides a comprehensive toolkit for working with Result-based workflows in TypeScript, making error handling and asynchronous control flow more predictable and expressive.
+`chas` combines the power of the `Result` monad with a modern **Tagged Error system**. This allows you to define rich, discriminated error unions that are real `Error` instances at runtime, complete with stack traces and exhaustive pattern matching.
 
-- It includes full support for asynchronous operations through `ResultAsync`, along with concurrency utilities such as `allAsync` and `shapeAsync` for coordinating multiple results.
+- **Unified Async Control**: Full support for `ResultAsync` and concurrency utilities like `allAsync` and `shapeAsync` to coordinate complex parallel operations.
     ```ts
     const data = await chas.shapeAsync({
-    	user: fetchUser(),
-    	config: fetchConfig(),
+        user: fetchUser(),
+        config: fetchConfig(),
     }); // Returns Ok({ user, config }) or the first Err
     ```
-- The library also offers resilient execution patterns with built-in retry, delay, and timeout capabilities via `withRetryAsync`.
-    ```ts
-    const fetchWithRetry = chas.withRetryAsync(() => fetch('/api'), {
-    	retries: 3,
-    	delayMs: 1000,
-    	onThrow: e => new Error('Failed'),
-    });
-    ```
+- **Tagged Error System**: Define typed error unions with `chas.errors()` and handle them safely with `matchError()` or `catchTag()`. These errors are native `Error` instances, ensuring compatibility with standard logging and monitoring tools.
+- **Resilient Patterns**: Built-in support for retry, delay, and timeouts via `withRetryAsync` out of the box.
 - To enable more ergonomic chaining, it provides a generator-based do-notation (`chas.go`) that mimics Rust’s `?` operator, allowing linear handling of results without deeply nested logic. It supports both synchronous and asynchronous operations cleanly, and returns a fully typed `Result` or `ResultAsync`.
     ```ts
     const result = await chas.go(async function* () {
