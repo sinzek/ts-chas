@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { chas } from '../src/index';
 
-const AppError = chas.errors(
+const AppError = chas.defineErrs(
 	{
 		NotFound: (resource: string, id: string) => ({ resource, id }),
 		Validation: (field: string, message: string) => ({ field, message }),
@@ -165,3 +165,11 @@ const test6: unknown = 1;
 if (chas.is.result(chas.is.number, chas.is.tagged('NotFound'))(test6)) {
 	console.log(test6);
 }
+
+const test7 = chas.ok(1).pipe(r => r.map(v => v * 2));
+
+const example = chas.pipe(
+	10,
+	v => v * 2,
+	v => v / 4
+);

@@ -11,6 +11,36 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./tagged-errs": {
+      "types": "./dist/tagged-errs.d.ts",
+      "import": "./dist/tagged-errs.js",
+      "require": "./dist/tagged-errs.cjs"
+    },
+    "./result": {
+      "types": "./dist/result.d.ts",
+      "import": "./dist/result.js",
+      "require": "./dist/result.cjs"
+    },
+    "./option": {
+      "types": "./dist/option.d.ts",
+      "import": "./dist/option.js",
+      "require": "./dist/option.cjs"
+    },
+    "./task": {
+      "types": "./dist/task.d.ts",
+      "import": "./dist/task.js",
+      "require": "./dist/task.cjs"
+    },
+    "./guard": {
+      "types": "./dist/guard.d.ts",
+      "import": "./dist/guard.js",
+      "require": "./dist/guard.cjs"
+    },
+    "./pipe": {
+      "types": "./dist/pipe.d.ts",
+      "import": "./dist/pipe.js",
+      "require": "./dist/pipe.cjs"
     }
   },
   "files": [

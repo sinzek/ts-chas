@@ -181,7 +181,7 @@ export type MatchErrorPartialHandlers<E extends TaggedError, R> = {
  * // → Error with .cause pointing to the Database error
  * ```
  */
-export const errors = <T extends ErrorDefinitions, B extends Record<string, unknown> = {}>(
+export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, unknown> = {}>(
 	definitions: T,
 	baseProps?: B
 ): ErrorFactories<T, B> => {
@@ -393,4 +393,17 @@ export const isAnyErrorWithTag = <E extends TaggedError, Tag extends E['_tag']>(
 	tags: readonly Tag[]
 ): error is Extract<E, { _tag: Tag }> => {
 	return tags.includes(error._tag as Tag);
+};
+
+/**
+ * Namespace for Tagged Error utilities.
+ */
+export const TaggedErrs = {
+	define: defineErrs,
+	match: matchError,
+	matchAsync: matchErrorAsync,
+	matchPartial: matchErrorPartial,
+	matchPartialAsync: matchErrorPartialAsync,
+	is: isErrorWithTag,
+	isAny: isAnyErrorWithTag,
 };

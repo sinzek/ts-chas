@@ -1,10 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ok, err, okAsync, errAsync, type ResultAsync, type Ok, type Err, type ResultMethods } from './result.js';
 import { type NonVoid } from './utils.js';
-import { type Guard } from './is.js';
+import { type Guard } from './guard.js';
 
 /**
  * Represents the "None" variant of an `Option` (equivalent to `Err<never>`)
+ *
+ * @example Creating a None
+ * ```ts
+ * import { none } from 'chas/option';
+ * const x = none();
+ * expect(x.isNone()).toBe(true);
+ * ```
  */
 export type None = Err<never> &
 	Omit<ResultMethods<never, never>, 'unwrap'> & {
@@ -26,6 +33,14 @@ export type None = Err<never> &
 
 /**
  * Represents the "Some" variant of an `Option` (equivalent to `Ok<NonNullable<T>>`)
+ *
+ * @example Creating a Some
+ * ```ts
+ * import { some } from 'chas/option';
+ * const x = some(5);
+ * expect(x.isSome()).toBe(true);
+ * const val = x.value; // Accessible directly!
+ * ```
  */
 export type Some<T> = Ok<NonVoid<T>> &
 	Omit<ResultMethods<NonVoid<T>, never>, 'unwrap'> & {
@@ -59,6 +74,14 @@ export type Some<T> = Ok<NonVoid<T>> &
  * or `None`, and does not.
  *
  * Implementation-wise, `Option<T>` is effectively an alias for `Result<NonNullable<T>, never>`.
+ *
+ * @example Creating an Option from a nullable value
+ * ```ts
+ * import { fromNullable } from 'chas/option';
+ * const x = fromNullable(5);
+ * expect(x.isSome()).toBe(true);
+ * const val = x.value; // Accessible directly!
+ * ```
  */
 export type Option<T> = Some<T> | None;
 
@@ -129,6 +152,10 @@ export const fromNullable = <T>(value: T): Option<T> => {
 	return value === null || value === undefined ? none() : (some(value) as Some<T>);
 };
 
+export const fromNullableAsync = <T>(value: T | Promise<T>): OptionAsync<T> => {
+	return value === null || value === undefined ? noneAsync() : (someAsync(value) as OptionAsync<T>);
+};
+
 /**
  * Creates an `Option` from a value based on a type guard.
  *
@@ -147,3 +174,27 @@ export const fromNullable = <T>(value: T): Option<T> => {
 export const optionFromGuard = <T>(value: unknown, guard: Guard<T>): Option<T> => {
 	return guard(value) ? (some(value as any) as Some<T>) : none();
 };
+
+/**
+ * Namespace for Option types and utilities.
+ * Merges with the `Option` type definition.
+ */
+export const Option = {
+	some,
+	none,
+	fromNullable,
+	fromNullableAsync,
+	optionFromGuard,
+	someAsync,
+	noneAsync,
+} as const;
+
+/**
+ * Namespace for OptionAsync utilities.
+ * Merges with the `OptionAsync` type definition.
+ */
+export const OptionAsync = {
+	some: someAsync,
+	none: noneAsync,
+	fromNullable: fromNullableAsync,
+} as const;

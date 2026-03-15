@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from 'vitest';
-import { chas } from './index.js';
+import { chas } from '../src/index.js';
 
 describe('chas', () => {
 	describe('ok', () => {
@@ -766,7 +766,7 @@ describe('chas', () => {
 	});
 
 	describe('Tagged Errors', () => {
-		const TestError = chas.errors({
+		const TestError = chas.defineErrs({
 			NotFound: (resource: string, id: string) => ({ resource, id }),
 			Validation: (field: string, message: string) => ({ field, message }),
 			Unauthorized: () => ({}),
@@ -923,7 +923,7 @@ describe('chas', () => {
 
 		it('supports error wrapping via cause', () => {
 			const root = new Error('root cause');
-			const AppError = chas.errors({
+			const AppError = chas.defineErrs({
 				Wrapped: (cause: Error) => ({ cause }),
 			});
 
