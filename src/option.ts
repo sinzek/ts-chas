@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ok, err, okAsync, errAsync, type ResultAsync, type Ok, type Err, type ResultMethods } from './result.js';
 import { type NonVoid } from './utils.js';
 import { type Guard } from './guard.js';
@@ -176,8 +175,7 @@ export const optionFromGuard = <T>(value: unknown, guard: Guard<T>): Option<T> =
 };
 
 /**
- * Namespace for Option types and utilities.
- * Merges with the `Option` type definition.
+ * Also a namespace for Option utilities, merges with the `Option` type definition.
  */
 export const Option = {
 	some,
@@ -190,8 +188,7 @@ export const Option = {
 } as const;
 
 /**
- * Namespace for OptionAsync utilities.
- * Merges with the `OptionAsync` type definition.
+ * Also a namespace for OptionAsync utilities, merges with the `OptionAsync` type definition.
  */
 export const OptionAsync = {
 	some: someAsync,

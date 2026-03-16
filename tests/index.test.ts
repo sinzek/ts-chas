@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from 'vitest';
 import { chas } from '../src/index.js';
 
@@ -772,7 +771,7 @@ describe('chas', () => {
 			Unauthorized: () => ({}),
 		});
 
-		type TestError = chas.InferErrors<typeof TestError>;
+		type TestError = chas.InferErrs<typeof TestError>;
 
 		it('errors() creates tagged error objects', () => {
 			const e1 = TestError.NotFound('user', '123');
@@ -797,7 +796,7 @@ describe('chas', () => {
 
 		it('matchError() exhaustively matches tags', () => {
 			const err1 = TestError.NotFound('user', '123') as TestError;
-			const message1 = chas.matchError(err1, {
+			const message1 = chas.matchErr(err1, {
 				NotFound: e => `${e.resource} ${e.id} not found`,
 				Validation: e => `${e.field}: ${e.message}`,
 				Unauthorized: () => 'unauthorized',
@@ -805,7 +804,7 @@ describe('chas', () => {
 			expect(message1).toBe('user 123 not found');
 
 			const err2 = TestError.Validation('email', 'invalid') as TestError;
-			const message2 = chas.matchError(err2, {
+			const message2 = chas.matchErr(err2, {
 				NotFound: e => `${e.resource} not found`,
 				Validation: e => `${e.field}: ${e.message}`,
 				Unauthorized: () => 'unauthorized',
@@ -816,7 +815,7 @@ describe('chas', () => {
 		it('isErrorTag() narrows the type', () => {
 			const err = TestError.NotFound('user', '123') as TestError;
 
-			if (chas.isErrorWithTag(err, 'NotFound')) {
+			if (chas.isErrWithTag(err, 'NotFound')) {
 				expect(err.resource).toBe('user');
 				expect(err.id).toBe('123');
 			} else {
@@ -824,9 +823,9 @@ describe('chas', () => {
 			}
 
 			const validationErr = TestError.Validation('email', 'bad') as TestError;
-			expect(chas.isErrorWithTag(validationErr, 'NotFound')).toBe(false);
-			expect(chas.isErrorWithTag(validationErr, 'Unauthorized')).toBe(false);
-			expect(chas.isErrorWithTag(validationErr, 'Validation')).toBe(true);
+			expect(chas.isErrWithTag(validationErr, 'NotFound')).toBe(false);
+			expect(chas.isErrWithTag(validationErr, 'Unauthorized')).toBe(false);
+			expect(chas.isErrWithTag(validationErr, 'Validation')).toBe(true);
 		});
 
 		it('integrates with Result.match', () => {
@@ -839,7 +838,7 @@ describe('chas', () => {
 			const r1 = getUser('42').match({
 				ok: v => v,
 				err: e =>
-					chas.matchError(e, {
+					chas.matchErr(e, {
 						NotFound: e => `${e.resource} ${e.id} not found`,
 						Validation: e => `Bad ${e.field}: ${e.message}`,
 						Unauthorized: () => 'unauthorized',
@@ -850,7 +849,7 @@ describe('chas', () => {
 			const r2 = getUser('missing').match({
 				ok: v => v,
 				err: e =>
-					chas.matchError(e, {
+					chas.matchErr(e, {
 						NotFound: e => `${e.resource} ${e.id} not found`,
 						Validation: e => `Bad ${e.field}: ${e.message}`,
 						Unauthorized: () => 'unauthorized',
@@ -861,13 +860,13 @@ describe('chas', () => {
 
 		it('matchErrorPartial() matches subset with wildcard', () => {
 			const err = TestError.NotFound('user', '123') as TestError;
-			const msg = chas.matchErrorPartial(err, {
+			const msg = chas.matchErrPartial(err, {
 				Validation: e => `Bad ${e.field}`,
 				_: e => `Fallback: ${e._tag}`,
 			});
 			expect(msg).toBe('Fallback: NotFound');
 
-			const msg2 = chas.matchErrorPartial(TestError.Validation('f', 'm') as TestError, {
+			const msg2 = chas.matchErrPartial(TestError.Validation('f', 'm') as TestError, {
 				Validation: e => `Bad ${e.field}`,
 				_: () => 'fallback',
 			});

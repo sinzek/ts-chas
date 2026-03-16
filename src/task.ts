@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
 	errAsync,
 	fromPromise,
@@ -10,8 +9,10 @@ import {
 	allAsync as resultAllAsync,
 	anyAsync as resultAnyAsync,
 	collectAsync as resultCollectAsync,
+	ok,
 } from './result.js';
-import { type TaggedError } from './tagged-errs.js';
+import { type TaggedErr } from './tagged-errs.js';
+import { type Option } from './option.js';
 
 /**
  * A promise-like wrapper with chaining, mapping, error handling, and resilience logic that evaluates to a ResultAsync.
@@ -23,7 +24,19 @@ import { type TaggedError } from './tagged-errs.js';
  * ```
  */
 export class Task<T, E> {
-	constructor(private readonly run: () => ResultAsync<T, E>) {}
+	private readonly run: (ctx?: any) => ResultAsync<T, E>;
+
+	constructor(run: (ctx?: any) => ResultAsync<T, E> | Promise<Result<T, E>>) {
+		this.run = ctx => {
+			try {
+				const res = run(ctx);
+				if (res instanceof ResultAsync) return res;
+				return fromPromise(res as Promise<Result<T, E>>, e => err(e as any)).andThen(v => v) as any;
+			} catch (e) {
+				return errAsync(e as any);
+			}
+		};
+	}
 
 	/**
 	 * Creates a Task from a Promise and an error mapper.
@@ -33,6 +46,17 @@ export class Task<T, E> {
 	 */
 	static from<T, E>(fn: () => Promise<T>, onError: (e: unknown) => E): Task<T, E> {
 		return new Task(() => fromPromise(fn(), onError));
+	}
+
+	/**
+	 * Creates a Task that returns the current context.
+	 *
+	 * @returns a Task
+	 */
+	static ask<C>(): Task<C, never> {
+		return new Task(
+			ctx => ResultAsync.fromSafePromise(Promise.resolve(ctx as C)) as unknown as ResultAsync<C, never>
+		);
 	}
 
 	/**
@@ -79,8 +103,8 @@ export class Task<T, E> {
 	 * ```
 	 */
 	static all<T, E>(tasks: Iterable<Task<T, E>>): Task<T[], E> {
-		return new Task(() => {
-			const asyncResults = Array.from(tasks).map(t => t.run());
+		return new Task(ctx => {
+			const asyncResults = Array.from(tasks).map(t => t.run(ctx));
 			return resultAllAsync(asyncResults) as unknown as ResultAsync<T[], E>;
 		});
 	}
@@ -98,8 +122,8 @@ export class Task<T, E> {
 	 * ```
 	 */
 	static race<T, E>(tasks: Iterable<Task<T, E>>): Task<T, E> {
-		return new Task(() => {
-			const promises = Array.from(tasks).map(t => t.run());
+		return new Task(ctx => {
+			const promises = Array.from(tasks).map(t => t.run(ctx));
 			return new ResultAsync(Promise.race(promises));
 		});
 	}
@@ -117,8 +141,8 @@ export class Task<T, E> {
 	 * ```
 	 */
 	static any<T, E>(tasks: Iterable<Task<T, E>>): Task<T, E[]> {
-		return new Task(() => {
-			const asyncResults = Array.from(tasks).map(t => t.run());
+		return new Task(ctx => {
+			const asyncResults = Array.from(tasks).map(t => t.run(ctx));
 			return resultAnyAsync(asyncResults) as unknown as ResultAsync<T, E[]>;
 		});
 	}
@@ -137,9 +161,134 @@ export class Task<T, E> {
 	 * ```
 	 */
 	static collect<T, E>(tasks: Iterable<Task<T, E>>): Task<T[], E[]> {
-		return new Task(() => {
-			const asyncResults = Array.from(tasks).map(t => t.run());
+		return new Task(ctx => {
+			const asyncResults = Array.from(tasks).map(t => t.run(ctx));
 			return resultCollectAsync(asyncResults) as unknown as ResultAsync<T[], E[]>;
+		});
+	}
+
+	/**
+	 * Runs multiple tasks in parallel with a concurrency limit.
+	 * Returns Ok with an array of values if all succeed, or Err with the first error encountered.
+	 *
+	 * @param tasks iterable of Tasks
+	 * @param concurrency maximum number of concurrent executions
+	 * @returns a Task
+	 *
+	 * @example
+	 * ```ts
+	 * const tasks = [chas.Task.delay(100).map(() => 1), chas.Task.delay(100).map(() => 2)];
+	 * const result = await chas.Task.parallel(tasks, 1); // Executes sequentially, returns Ok([1, 2])
+	 * ```
+	 */
+	static parallel<T, E>(tasks: Iterable<Task<T, E>>, concurrency: number): Task<T[], E> {
+		return new Task(ctx => {
+			const taskArray = Array.from(tasks);
+			if (taskArray.length === 0)
+				return ResultAsync.fromSafePromise(Promise.resolve([] as T[])) as unknown as ResultAsync<T[], E>;
+
+			const results: T[] = new Array(taskArray.length);
+			let completedCount = 0;
+			let startedCount = 0;
+			let firstError: E | undefined;
+			let resolvePromise: (res: Result<T[], E>) => void = () => {};
+
+			const promise = new Promise<Result<T[], E>>(resolve => {
+				resolvePromise = resolve;
+			});
+
+			const next = () => {
+				if (firstError !== undefined) return;
+				if (completedCount === taskArray.length) {
+					resolvePromise(ok(results));
+					return;
+				}
+
+				while (startedCount < taskArray.length && startedCount - completedCount < concurrency) {
+					const index = startedCount++;
+					const task = taskArray[index];
+					if (!task) continue;
+					task.run(ctx).then(res => {
+						if (firstError !== undefined) return;
+						if (res.ok) {
+							results[index] = (res as any).value;
+							completedCount++;
+							next();
+						} else {
+							firstError = res.error;
+							resolvePromise(err(firstError));
+						}
+					});
+				}
+			};
+
+			next();
+			return new ResultAsync(promise);
+		});
+	}
+
+	/**
+	 * Creates a Task that resolves to Ok(undefined).
+	 */
+	static void(): Task<void, never> {
+		return new Task(() => ResultAsync.fromSafePromise(Promise.resolve(undefined as void)));
+	}
+
+	/**
+	 * Creates a Task from an Option.
+	 * @param option Option to convert
+	 * @param onNone function that returns an error if the Option is None
+	 * @returns a Task
+	 */
+	static fromOption<T, E>(option: Option<T>, onNone: () => E): Task<T, E> {
+		return new Task(() =>
+			option.isSome()
+				? (ResultAsync.fromSafePromise(Promise.resolve(option.value)) as unknown as ResultAsync<T, E>)
+				: errAsync(onNone())
+		);
+	}
+
+	/**
+	 * Provides a context value to the task.
+	 *
+	 * @param context context value
+	 * @returns a Task
+	 */
+	provide(context: any): Task<T, E> {
+		return new Task(() => this.run(context));
+	}
+
+	/**
+	 * Resource management helper. Acquires a resource, uses it, and ensures it is released.
+	 * Even if the 'use' task fails, the resource is released.
+	 *
+	 * @param acquire Task to acquire the resource
+	 * @param release function to release the resource
+	 * @param use function that uses the resource and returns a Task
+	 * @returns a Task
+	 */
+	static using<R, T, E>(
+		acquire: Task<R, E>,
+		release: (res: R) => Promise<void> | void,
+		use: (res: R) => Task<T, E>
+	): Task<T, E> {
+		return new Task(ctx => {
+			return acquire.run(ctx).andThen(res => {
+				return new ResultAsync(
+					Promise.resolve(
+						use(res)
+							.run(ctx)
+							.then(async result => {
+								try {
+									await release(res);
+								} catch {
+									// Release errors are ignored in the base using pattern
+								}
+								return result;
+							})
+					)
+				);
+			});
 		});
 	}
 
@@ -157,7 +306,7 @@ export class Task<T, E> {
 	 */
 	chain<U>(next: (arg: T) => Task<U, E>): Task<U, E> {
 		return new Task(
-			() => this.run().andThen(val => next(val).run()) // short-circuits on error
+			ctx => this.run(ctx).andThen(val => next(val).run(ctx)) // short-circuits on error
 		);
 	}
 
@@ -173,7 +322,7 @@ export class Task<T, E> {
 	 * ```
 	 */
 	map<U>(fn: (arg: T) => U): Task<U, E> {
-		return new Task(() => this.run().map(fn));
+		return new Task(ctx => this.run(ctx).map(fn));
 	}
 
 	/**
@@ -188,7 +337,7 @@ export class Task<T, E> {
 	 * ```
 	 */
 	mapErr<F>(fn: (error: E) => F): Task<T, F> {
-		return new Task(() => this.run().mapErr(fn));
+		return new Task(ctx => this.run(ctx).mapErr(fn));
 	}
 
 	/**
@@ -204,12 +353,12 @@ export class Task<T, E> {
 	 * ```
 	 */
 	retry(count: number, options?: { delay?: number; factor?: number }): Task<T, E> {
-		return new Task(() => {
+		return new Task(ctx => {
 			const delay = options?.delay ?? 0;
 			const factor = options?.factor ?? 1;
 
 			const attempt = (remaining: number, currentDelay: number): ResultAsync<T, E> => {
-				return this.run().orElse(error => {
+				return this.run(ctx).orElse(error => {
 					if (remaining <= 0) return errAsync(error);
 
 					if (currentDelay > 0) {
@@ -246,7 +395,7 @@ export class Task<T, E> {
 		let lastFailureTime = 0;
 		let state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
 
-		return new Task(() => {
+		return new Task(ctx => {
 			const now = Date.now();
 
 			if (state === 'OPEN') {
@@ -257,7 +406,7 @@ export class Task<T, E> {
 				}
 			}
 
-			return this.run()
+			return this.run(ctx)
 				.inspect(() => {
 					if (state === 'HALF_OPEN') {
 						state = 'CLOSED';
@@ -296,12 +445,12 @@ export class Task<T, E> {
 			}
 		};
 
-		return new Task(() => {
+		return new Task(ctx => {
 			return new ResultAsync(
 				new Promise<Result<T, E>>((resolve, reject) => {
 					const execute = () => {
 						active++;
-						this.run().then(
+						this.run(ctx).then(
 							res => {
 								active--;
 								next();
@@ -338,11 +487,22 @@ export class Task<T, E> {
 	 * ```
 	 */
 	orElse<F>(fn: (error: E) => Task<T, F>): Task<T, F> {
-		return new Task(() => this.run().orElse(e => fn(e).run() as any) as any);
+		return new Task(ctx => this.run(ctx).orElse(e => fn(e).run(ctx) as any) as any);
 	}
 
 	/**
-	 * Special recovery operator for TaggedErrors.
+	 * Explicit fallback to another task if this one fails.
+	 * Semantic alias for orElse.
+	 *
+	 * @param other The task to run if this one fails.
+	 * @returns a Task
+	 */
+	fallback(other: Task<T, E>): Task<T, E> {
+		return this.orElse(() => other);
+	}
+
+	/**
+	 * Special recovery operator for `TaggedErr`.
 	 *
 	 * @param tag The tag to match.
 	 * @param handler The function to apply to the error.
@@ -350,15 +510,15 @@ export class Task<T, E> {
 	 *
 	 * @example
 	 * ```ts
-	 * const task = chas.Task.from(() => Promise.resolve(1)).catchTag('error', e => chas.Task.from(() => Promise.resolve(e + 1)));
+	 * const task = chas.Task.from(() => Promise.resolve(1)).catchTag('NotFound', e => chas.Task.from(() => Promise.resolve(e + 1)));
 	 * const result = await task.execute(); // Ok(1) or Err(error)
 	 * ```
 	 */
 	catchTag<Tag extends string, E2 = never>(
 		tag: Tag,
-		handler: (error: [E] extends [TaggedError] ? Extract<E, { _tag: Tag }> : any) => Task<T, E2>
-	): Task<T, [E] extends [TaggedError] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
-		return new Task(() => this.run().catchTag(tag, e => handler(e).run() as any) as any);
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any) => Task<T, E2>
+	): Task<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
+		return new Task(ctx => this.run(ctx).catchTag(tag, e => handler(e).run(ctx) as any) as any);
 	}
 
 	/**
@@ -374,7 +534,7 @@ export class Task<T, E> {
 	 * ```
 	 */
 	inspect(fn: (value: T) => void | Promise<void>): Task<T, E> {
-		return new Task(() => this.run().inspect(fn));
+		return new Task(ctx => this.run(ctx).inspect(fn));
 	}
 
 	/**
@@ -390,7 +550,7 @@ export class Task<T, E> {
 	 * ```
 	 */
 	inspectErr(fn: (error: E) => void | Promise<void>): Task<T, E> {
-		return new Task(() => this.run().inspectErr(fn));
+		return new Task(ctx => this.run(ctx).inspectErr(fn));
 	}
 
 	/**
@@ -407,12 +567,12 @@ export class Task<T, E> {
 	 * ```
 	 */
 	timeout(ms: number, onTimeout: () => E): Task<T, E> {
-		return new Task(() => {
+		return new Task(ctx => {
 			const timeoutPromise = new Promise<Result<T, E>>((_, reject) =>
 				setTimeout(() => reject('TIMEOUT_INTERNAL'), ms)
 			);
 			return new ResultAsync(
-				Promise.race([this.run().then(res => res), timeoutPromise]).catch(e =>
+				Promise.race([this.run(ctx).then(res => res), timeoutPromise]).catch(e =>
 					e === 'TIMEOUT_INTERNAL' ? err(onTimeout()) : err(e as E)
 				)
 			);
@@ -433,15 +593,32 @@ export class Task<T, E> {
 	 * ```
 	 */
 	delay(ms: number): Task<T, E> {
-		return new Task(() => {
+		return new Task(ctx => {
 			const wait = new Promise(resolve => setTimeout(resolve, ms));
-			return new ResultAsync(wait.then(() => this.run().then(res => res)));
+			return new ResultAsync(wait.then(() => this.run(ctx).then(res => res)));
+		});
+	}
+
+	/**
+	 * Binds an AbortSignal to the task. If the signal is aborted, the task will fail with the abort reason.
+	 *
+	 * @param signal The signal to bind.
+	 * @returns a Task
+	 */
+	withSignal(signal: AbortSignal): Task<T, E> {
+		return new Task(ctx => {
+			if (signal.aborted) return errAsync(signal.reason ?? 'ABORTED');
+			const abortPromise = new Promise<Result<T, E>>((_, reject) => {
+				signal.addEventListener('abort', () => reject(signal.reason ?? 'ABORTED'), { once: true });
+			});
+			return new ResultAsync(Promise.race([this.run(ctx), abortPromise]).catch(e => err(e)));
 		});
 	}
 
 	/**
 	 * Executes the task and returns the result.
 	 *
+	 * @param signal optional AbortSignal to cancel the execution
 	 * @returns a Promise of the result
 	 *
 	 * @example
@@ -450,8 +627,9 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1)
 	 * ```
 	 */
-	async execute(): Promise<Result<T, E>> {
-		return this.run();
+	async execute(signal?: AbortSignal): Promise<Result<T, E>> {
+		if (signal) return this.withSignal(signal).run(undefined);
+		return this.run(undefined);
 	}
 
 	/**
@@ -466,14 +644,147 @@ export class Task<T, E> {
 	 * ```
 	 */
 	async unwrap(): Promise<T> {
-		return this.run().then(res => res.unwrap());
+		return this.run(undefined).then(res => res.unwrap());
 	}
 
 	*[Symbol.iterator](): Generator<ResultAsync<T, E>, T, any> {
-		return yield* this.run();
+		return yield* this.run(undefined);
 	}
 
 	async *[Symbol.asyncIterator](): AsyncGenerator<Result<T, E>, T, any> {
-		return yield* this.run();
+		return yield* this.run(undefined);
 	}
+
+	/**
+	 * Memoization for Task. Only executes once and caches the result.
+	 *
+	 * @returns a Task
+	 */
+	once(): Task<T, E> {
+		let cached: ResultAsync<T, E> | undefined;
+		return new Task(ctx => {
+			if (cached) return cached;
+			cached = this.run(ctx);
+			return cached;
+		});
+	}
+
+	/**
+	 * Memoization with TTL and error handling.
+	 *
+	 * @param options configuration for caching.
+	 * @returns a Task
+	 */
+	memoize(options?: { ttl?: number; cacheErr?: boolean }): Task<T, E> {
+		let cached: { result: Result<T, E>; timestamp: number } | undefined;
+		let pending: Promise<Result<T, E>> | undefined;
+
+		return new Task(ctx => {
+			const now = Date.now();
+			if (cached && (!options?.ttl || now - cached.timestamp < options.ttl)) {
+				return ResultAsync.fromSafePromise(Promise.resolve(cached.result)) as unknown as ResultAsync<T, E>;
+			}
+
+			if (pending) return new ResultAsync(pending);
+
+			const p = this.run(ctx).then(res => {
+				if (res.isOk() || options?.cacheErr) {
+					cached = { result: res, timestamp: Date.now() };
+				}
+				pending = undefined;
+				return res;
+			});
+			pending = Promise.resolve(p);
+
+			return new ResultAsync(pending);
+		});
+	}
+
+	/**
+	 * External caching for Task.
+	 *
+	 * @param key cache key
+	 * @param store cache store
+	 * @param options configuration for caching.
+	 * @returns a Task
+	 *
+	 * @example
+	 * ```ts
+	 * const cache = new Map<string, Result<number, Error>>();
+	 * const task = Task.from(() => Promise.resolve(1)).cache('key', cache);
+	 * const result = await task.execute();
+	 * ```
+	 */
+	cache(key: string, store: TaskCache, options?: { ttl?: number }): Task<T, E> {
+		return new Task(ctx => {
+			return new ResultAsync(
+				Promise.resolve(
+					(async () => {
+						const cached = await store.get<Result<T, E>>(key);
+						if (cached) return cached;
+
+						const res = await this.run(ctx);
+						await store.set(key, res, options?.ttl);
+						return res;
+					})()
+				)
+			);
+		});
+	}
+}
+
+/**
+ * Interface for custom cache stores.
+ *
+ * @example With Map
+ * ```ts
+ * const cache = new Map<string, Result<number, Error>>();
+ * const task = Task.from(() => Promise.resolve(1)).cache('key', cache);
+ * const result = await task.execute();
+ * ```
+ *
+ * @example With Redux
+ * ```ts
+ * import { createStore } from 'redux';
+ * import { Task } from 'chas';
+ *
+ * const store = createStore<{ cache: Map<string, Result<number, Error>> }>(set => ({
+ *   cache: new Map(),
+ * }));
+ *
+ * const task = Task.from(() => Promise.resolve(1)).cache('key', {
+ *   get: key => store.getState().cache.get(key),
+ *   set: (key, value, ttl) => {
+ *   	store.dispatch({
+ *     	type: 'SET_CACHE',
+ *     	payload: { key, value },
+ *   	});
+ *   },
+ * });
+ * const result = await task.execute();
+ * ```
+ *
+ * @example With Zustand
+ * ```ts
+ * import { create } from 'zustand';
+ * import { Task } from 'chas';
+ *
+ * const useCache = create<{ cache: Map<string, Result<number, Error>> }>(set => ({
+ *   cache: new Map(),
+ * }));
+ *
+ * const task = Task.from(() => Promise.resolve(1)).cache('key', {
+ *   get: key => useCache.getState().cache.get(key),
+ *   set: (key, value, ttl) => {
+ *     useCache.setState(state => {
+ *       state.cache.set(key, value);
+ *     });
+ *   },
+ * });
+ * const result = await task.execute();
+ * ```
+ */
+export interface TaskCache {
+	get<T>(key: string): T | undefined | Promise<T | undefined>;
+	set<T>(key: string, value: T, ttl?: number): void | Promise<void>;
 }

@@ -9,8 +9,8 @@
 - **Unified Async Control**: Full support for `ResultAsync` and concurrency utilities like `allAsync` and `shapeAsync` to coordinate complex parallel operations.
     ```ts
     const data = await chas.shapeAsync({
-        user: fetchUser(),
-        config: fetchConfig(),
+    	user: fetchUser(),
+    	config: fetchConfig(),
     }); // Returns Ok({ user, config }) or the first Err
     ```
 - **Tagged Error System**: Define typed error unions with `chas.errors()` and handle them safely with `matchError()` or `catchTag()`. These errors are native `Error` instances, ensuring compatibility with standard logging and monitoring tools.
@@ -369,14 +369,14 @@ const AppError = chas.errors({
 });
 
 // Extract the union type
-type AppError = chas.InferErrors<typeof AppError>;
+type AppErr = chas.InferErrors<typeof AppError>;
 
 // Create instances — they are real Error objects with a `_tag` discriminant
 const err = AppError.NotFound('user', '123');
 // → Error { _tag: "NotFound", resource: "user", id: "123", stack: "...", name: "NotFound" }
 
 // Use with Result
-function getUser(id: string): chas.Result<User, AppError> {
+function getUser(id: string): chas.Result<User, AppErr> {
 	if (!id) return chas.err(AppError.Validation('id', 'required'));
 	return chas.ok(user);
 }

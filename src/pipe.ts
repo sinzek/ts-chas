@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import type { MaybePromise } from './utils.js';
 
 /**
@@ -11,7 +9,7 @@ import type { MaybePromise } from './utils.js';
  *
  * Regardless, if you need more than 10 functions in your pipe, you're probably doing something wrong.
  *
- * - chasebrock
+ * - chase
  */
 
 /**

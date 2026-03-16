@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { type TaggedError } from './tagged-errs.js';
+import { type TaggedErr } from './tagged-errs.js';
 import { type None, type Option, type OptionAsync, type Some } from './option.js';
 import { type Guard } from './guard.js';
 import type { NonVoid } from './utils.js';
@@ -607,8 +606,8 @@ export interface ResultMethods<T, E> {
 	 */
 	readonly catchTag: <Tag extends string, E2 = never>(
 		tag: Tag,
-		handler: (error: [E] extends [TaggedError] ? Extract<E, { _tag: Tag }> : any) => Result<T, E2>
-	) => Result<T, [E] extends [TaggedError] ? Exclude<E, { _tag: Tag }> | E2 : E | E2>;
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any) => Result<T, E2>
+	) => Result<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2>;
 
 	[Symbol.iterator](): Generator<Result<T, E>, T, any>;
 	[Symbol.asyncIterator](): AsyncGenerator<Result<T, E>, T, any>;
@@ -1121,12 +1120,12 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	catchTag<Tag extends string, E2 = never>(
 		tag: Tag,
 		handler: (
-			error: [E] extends [TaggedError] ? Extract<E, { _tag: Tag }> : any
+			error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any
 		) => Result<T, E2> | ResultAsync<T, E2> | PromiseLike<Result<T, E2>>
-	): ResultAsync<T, [E] extends [TaggedError] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
+	): ResultAsync<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
 		return new ResultAsync(this._promise.then(res => res.catchTag(tag, handler as any) as any)) as ResultAsync<
 			T,
-			[E] extends [TaggedError] ? Exclude<E, { _tag: Tag }> | E2 : E | E2
+			[E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2
 		>;
 	}
 
@@ -1282,8 +1281,8 @@ const ResultMethodsProto = {
 	isTaggedErr<T, E, Tag extends string>(
 		this: Result<T, E>,
 		tag: Tag
-	): this is Err<TaggedError & { readonly _tag: Tag }> {
-		return !this.ok && (this as unknown as Err<TaggedError>).error._tag === tag;
+	): this is Err<TaggedErr & { readonly _tag: Tag }> {
+		return !this.ok && (this as unknown as Err<TaggedErr>).error._tag === tag;
 	},
 	isOkAnd<T, E>(this: Result<T, E>, predicate: (value: T) => boolean): this is Ok<T> {
 		return this.ok && predicate(this.value);
@@ -1451,8 +1450,8 @@ const ResultMethodsProto = {
 	catchTag<T, E, Tag extends string, E2 = never>(
 		this: Result<T, E>,
 		tag: Tag,
-		handler: (error: [E] extends [TaggedError] ? Extract<E, { _tag: Tag }> : any) => Result<T, E2>
-	): Result<T, [E] extends [TaggedError] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any) => Result<T, E2>
+	): Result<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
 		if (this.ok) return this as any;
 		const error = (this as unknown as Err<any>).error;
 		if (error !== null && typeof error === 'object' && '_tag' in error && error._tag === tag) {
@@ -2011,10 +2010,10 @@ export const partitionAsync = async <T, E>(
  *
  * @example
  * ```ts
- * const safeData = chas.revive(await response.json());
+ * const safeData = chas.reattachResultMethods(await response.json());
  * ```
  */
-export const revive = <T, E>(parsedJson: unknown): Result<T, E> => {
+export const reattachResultMethods = <T, E>(parsedJson: unknown): Result<T, E> => {
 	if (!parsedJson || typeof parsedJson !== 'object' || !('ok' in parsedJson) || typeof parsedJson.ok !== 'boolean') {
 		throw new Error('Invalid Result object in chas.revive, got ' + JSON.stringify(parsedJson));
 	}
@@ -2201,8 +2200,7 @@ export const shapeAsync = <TRec extends Record<string, ResultAsync<any, any> | P
 };
 
 /**
- * Namespace for Result types and utilities.
- * Merges with the `Result` type definition.
+ * Also a namespace for Result utilities, merges with the `Result` type definition.
  */
 export const Result = {
 	ok,
@@ -2217,7 +2215,7 @@ export const Result = {
 	withResultAsync,
 	partition,
 	partitionAsync,
-	revive,
+	reattachMethods: reattachResultMethods,
 	withRetryAsync,
 	shape,
 	shapeAsync,
@@ -2229,6 +2227,9 @@ export const Result = {
 
 const resultGo = go;
 
+/**
+ * Also a namespace for ResultAsync utilities, merges with the `ResultAsync` type definition.
+ */
 export namespace ResultAsync {
 	export const all = allAsync;
 	export const any = anyAsync;

@@ -1,37 +1,13 @@
-/* eslint-disable @typescript-eslint/no-empty-object-type */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { err, tryCatch, fromPromise, type Result, type ResultAsync } from './result.js';
 import type { Prettify } from './utils.js';
 
 /**
- * Tagged error factories and exhaustive error matching for use with `Result<T, E>`.
- *
- * Create discriminated union error types with `errors()`, then match on them
- * exhaustively with `matchError()` or narrow with `isErrorTag()`.
- *
- * @example
- * ```ts
- * const AppError = chas.errors({
- *     NotFound:   (resource: string, id: string) => ({ resource, id }),
- *     Validation: (field: string, message: string) => ({ field, message }),
- * });
- *
- * type AppError = chas.InferErrors<typeof AppError>;
- *
- * const result: chas.Result<User, AppError> = chas.err(AppError.NotFound("user", "123"));
- *
- * chas.matchError(result.unwrapErr(), {
- *     NotFound:   (e) => `${e.resource} ${e.id} not found`,
- *     Validation: (e) => `${e.field}: ${e.message}`,
- * });
- * ```
+ * `TaggedErr` is a `Error` instance with a `_tag` discriminant field. It is an extension of `Error`
+ * that can be used with `Result<T, E>` to create a discriminated union of errors. It is also
+ * compatible with error tracking services and `console.log`, and can be used with `Error.cause`
+ * to wrap other errors.
  */
-
-// ── Types ────────────────────────────────────────────────────────────────
-
-/** A tagged error object with a `_tag` discriminant field. Extends `Error` for native stack traces. */
-export type TaggedError = Error & {
+export type TaggedErr = Error & {
 	readonly _tag: string;
 	toJSON: () => Record<string, unknown>;
 	toString: () => string;
@@ -42,15 +18,17 @@ type ErrorDefinitions = Record<string, (...args: any[]) => object>;
 
 /** Helper type to infer the exact union of errors produced by an ErrorDefinitions object */
 type InferErrorsFromDef<T extends ErrorDefinitions, B extends Record<string, unknown> = {}> = {
-	[K in keyof T & string]: Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedError;
+	[K in keyof T & string]: Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr;
 }[keyof T & string];
 
-/** Transforms error definitions into factory functions that produce tagged error objects. */
+/**
+ * Type that represents the factory functions for a set of tagged error definitions.
+ */
 export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, unknown> = {}> = {
 	readonly [K in keyof T & string]: {
-		(...args: Parameters<T[K]>): Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedError;
+		(...args: Parameters<T[K]>): Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr;
 		err: <Val = never>(...args: Parameters<T[K]>) => Result<Val, InferErrorsFromDef<T, B>>;
-		is: (err: unknown) => err is Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedError;
+		is: (err: unknown) => err is Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr;
 
 		/**
 		 * Synchronously executes a function and returns the result as an `Ok`.
@@ -71,11 +49,11 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
 			? <Val>(
 					fn: () => Val,
 					onThrow?: (error: unknown) => []
-				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedError>
+				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>
 			: <Val>(
 					fn: () => Val,
 					onThrow: (error: unknown) => Parameters<T[K]>
-				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedError>;
+				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>;
 
 		/**
 		 * Asynchronously executes a function and returns the result as an `Ok`.
@@ -96,11 +74,11 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
 			? <Val>(
 					fn: () => Promise<Val>,
 					onThrow?: (error: unknown) => []
-				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedError>
+				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>
 			: <Val>(
 					fn: () => Promise<Val>,
 					onThrow: (error: unknown) => Parameters<T[K]>
-				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedError>;
+				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>;
 	};
 };
 
@@ -109,40 +87,20 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
  *
  * @example
  * ```ts
- * const AppError = chas.errors({ NotFound: () => ({}) });
- * type AppError = chas.InferErrors<typeof AppError>; // { readonly _tag: "NotFound" }
+ * const AppError = chas.defineErrs({ NotFound: () => ({}) });
+ * type AppError = chas.InferErrs<typeof AppError>; // { readonly _tag: "NotFound" }
  * ```
  */
-export type InferErrors<T extends ErrorFactories<any, any>> = {
+export type InferErrs<T extends ErrorFactories<any, any>> = {
 	[K in keyof T & string]: T[K] extends (...args: any[]) => infer R ? R : never;
 }[keyof T & string];
 
 /**
- * Extracts a specific error variant from a TaggedError union.
+ * Extracts a specific error variant from a TaggedErr union.
  * @example
- * type NotFound = chas.ExtractError<AppErr, 'NotFound'>;
+ * type NotFound = chas.ExtractErr<AppErr, 'NotFound'>;
  */
-export type ExtractError<Union extends { _tag: string }, Tag extends Union['_tag']> = Extract<Union, { _tag: Tag }>;
-
-/**
- * The exhaustive handler map for `matchError`. Each key corresponds to a `_tag` variant,
- * and each value is a function that receives the narrowed error and returns a result.
- */
-export type MatchErrorHandlers<E extends TaggedError, R> = {
-	[K in E['_tag']]: (error: Extract<E, { _tag: K }>) => R;
-};
-
-/**
- * The partial handler map for `matchErrorPartial`. Specific `_tag` handlers are optional,
- * but a `_` wildcard handler is required to catch all unhandled variants.
- */
-export type MatchErrorPartialHandlers<E extends TaggedError, R> = {
-	[K in E['_tag']]?: (error: Extract<E, { _tag: K }>) => R;
-} & {
-	_: (error: E) => R;
-};
-
-// ── Functions ────────────────────────────────────────────────────────────
+export type ExtractErr<Union extends { _tag: string }, Tag extends Union['_tag']> = Extract<Union, { _tag: Tag }>;
 
 /**
  * Creates tagged error factory functions from a definition object.
@@ -162,7 +120,7 @@ export type MatchErrorPartialHandlers<E extends TaggedError, R> = {
  *
  * @example
  * ```ts
- * const AppError = chas.errors({
+ * const AppError = chas.defineErrs({
  *     NotFound:     (resource: string, id: string) => ({ resource, id }),
  *     Validation:   (field: string, message: string) => ({ field, message }),
  *     Unauthorized: () => ({}),
@@ -191,7 +149,6 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 		const factory = (...args: unknown[]) => {
 			const data = definitions[tag]!(...args) as Record<string, unknown>;
 
-			// custom message template support (specific data overrides baseProps)
 			const message =
 				typeof data['message'] === 'string'
 					? data['message']
@@ -199,7 +156,6 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 						? baseProps['message']
 						: `[${tag}]`;
 
-			// native Error.cause support
 			const cause =
 				data['cause'] instanceof Error
 					? data['cause']
@@ -215,9 +171,7 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 
 			const fullData = { ...baseProps, _tag: tag, name: tag, ...data };
 
-			// we put baseProps first, so specific 'data' can override base properties if needed.
 			Object.assign(errInstance, fullData);
-
 			Object.defineProperty(errInstance, 'toJSON', {
 				value: () => {
 					return {
@@ -227,14 +181,13 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 					};
 				},
 			});
-
 			Object.defineProperty(errInstance, 'toString', {
 				value: () => {
 					return `${errInstance.name}: ${errInstance.message}`;
 				},
 			});
 
-			return errInstance as unknown as TaggedError;
+			return errInstance as unknown as TaggedErr;
 		};
 
 		factory.err = (...args: unknown[]) => {
@@ -269,16 +222,13 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
  *
  * @example
  * ```ts
- * const message = chas.matchError(error, {
+ * const message = chas.matchErr(error, {
  *     NotFound:   (e) => `${e.resource} not found`,
  *     Validation: (e) => `Invalid ${e.field}: ${e.message}`,
  * });
  * ```
  */
-export const matchError = <
-	E extends TaggedError,
-	H extends { [K in E['_tag']]: (error: Extract<E, { _tag: K }>) => any },
->(
+export const matchErr = <E extends TaggedErr, H extends { [K in E['_tag']]: (error: Extract<E, { _tag: K }>) => any }>(
 	error: E,
 	handlers: H & { [K in Exclude<keyof H, E['_tag']>]: never }
 ): ReturnType<H[keyof H]> => {
@@ -287,10 +237,22 @@ export const matchError = <
 };
 
 /**
- * Async version of `matchError`. Ensures all branches resolve to a single Promise.
+ * Async version of `matchErr`. Ensures all branches resolve to a single Promise.
+ *
+ * @param error The tagged error to match on.
+ * @param handlers An object mapping each `_tag` variant to a handler function.
+ * @returns The result of the matched handler.
+ *
+ * @example
+ * ```ts
+ * const message = await chas.matchErrAsync(error, {
+ *     NotFound:   async (e) => Promise.resolve(`${e.resource} not found`),
+ *     Validation: async (e) => Promise.resolve(`Invalid ${e.field}: ${e.message}`),
+ * });
+ * ```
  */
-export const matchErrorAsync = async <
-	E extends TaggedError,
+export const matchErrAsync = async <
+	E extends TaggedErr,
 	H extends { [K in E['_tag']]: (error: Extract<E, { _tag: K }>) => any },
 >(
 	error: E,
@@ -312,14 +274,14 @@ export const matchErrorAsync = async <
  *
  * @example
  * ```ts
- * const message = chas.matchErrorPartial(error, {
+ * const message = chas.matchErrPartial(error, {
  *     Validation:   (e) => `Invalid ${e.field}`,
  *     Unauthorized: ()  => `Please log in`,
  *     _: (e) => `Unexpected error: ${e._tag}`,
  * });
  * ```
  */
-export const matchErrorPartial = <
+export const matchErrPartial = <
 	E,
 	H extends {
 		[K in Extract<E, { _tag: string }>['_tag']]?: (error: Extract<E, { _tag: K }>) => any;
@@ -338,9 +300,22 @@ export const matchErrorPartial = <
 };
 
 /**
- * Async version of `matchErrorPartial`.
+ * Async version of `matchErrPartial`.
+ *
+ * @param error The tagged error to match on.
+ * @param handlers An object with optional tag handlers and a required `_` wildcard.
+ * @returns The result of the matched handler.
+ *
+ * @example
+ * ```ts
+ * const message = await chas.matchErrPartialAsync(error, {
+ *     Validation:   async (e) => Promise.resolve(`Invalid ${e.field}`),
+ *     Unauthorized: async () => Promise.resolve(`Please log in`),
+ *     _: async (e) => Promise.resolve(`Unexpected error: ${e._tag}`),
+ * });
+ * ```
  */
-export const matchErrorPartialAsync = async <
+export const matchErrPartialAsync = async <
 	E,
 	H extends {
 		[K in Extract<E, { _tag: string }>['_tag']]?: (error: Extract<E, { _tag: K }>) => any;
@@ -367,12 +342,12 @@ export const matchErrorPartialAsync = async <
  *
  * @example
  * ```ts
- * if (chas.isErrorWithTag(error, "NotFound")) {
+ * if (chas.isErrWithTag(error, "NotFound")) {
  *     error.resource; // narrowed to NotFound variant
  * }
  * ```
  */
-export const isErrorWithTag = <E extends TaggedError, Tag extends E['_tag']>(
+export const isErrWithTag = <E extends TaggedErr, Tag extends E['_tag']>(
 	error: E,
 	tag: Tag
 ): error is Extract<E, { _tag: Tag }> => {
@@ -388,7 +363,7 @@ export const isErrorWithTag = <E extends TaggedError, Tag extends E['_tag']>(
  * }
  * ```
  */
-export const isAnyErrorWithTag = <E extends TaggedError, Tag extends E['_tag']>(
+export const isAnyErrWithTag = <E extends TaggedErr, Tag extends E['_tag']>(
 	error: E,
 	tags: readonly Tag[]
 ): error is Extract<E, { _tag: Tag }> => {
@@ -396,14 +371,14 @@ export const isAnyErrorWithTag = <E extends TaggedError, Tag extends E['_tag']>(
 };
 
 /**
- * Namespace for Tagged Error utilities.
+ * Also a namespace for Tagged Error utilities, merges with the `TaggedErr` type definition.
  */
 export const TaggedErrs = {
 	define: defineErrs,
-	match: matchError,
-	matchAsync: matchErrorAsync,
-	matchPartial: matchErrorPartial,
-	matchPartialAsync: matchErrorPartialAsync,
-	is: isErrorWithTag,
-	isAny: isAnyErrorWithTag,
+	match: matchErr,
+	matchAsync: matchErrAsync,
+	matchPartial: matchErrPartial,
+	matchPartialAsync: matchErrPartialAsync,
+	is: isErrWithTag,
+	isAny: isAnyErrWithTag,
 };

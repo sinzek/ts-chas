@@ -16,8 +16,8 @@ type User = {
 	id: string;
 };
 
-type AppErr = chas.InferErrors<typeof AppError>;
-type NotFoundErr = chas.ExtractError<AppErr, 'NotFound'>;
+type AppErr = chas.InferErrs<typeof AppError>;
+type NotFoundErr = chas.ExtractErr<AppErr, 'NotFound'>;
 
 // Create instances - they are real Error objects with a `_tag` discriminant
 const err = AppError.NotFound('user', '123');
@@ -43,7 +43,7 @@ const result = getUser('hello')
 		return chas.ok({ name: 'test', id: 'test' });
 	})
 	.inspectErr(e =>
-		chas.matchErrorPartial(e as AppErr | Error, {
+		chas.matchErrPartial(e as AppErr | Error, {
 			NotFound: e => {
 				console.log(e.resource, e.id);
 			},
@@ -58,7 +58,7 @@ const result = getUser('hello')
 	})
 	.okOr('error');
 
-const matched = chas.matchErrorPartial(err, {
+const matched = chas.matchErrPartial(err, {
 	NotFound: e => {
 		console.log(e.resource, e.id);
 		return chas.ok(e.exampleProp);
@@ -173,3 +173,19 @@ const example = chas.pipe(
 	v => v * 2,
 	v => v / 4
 );
+
+const schemas = chas.defineSchemas({
+	User: {
+		name: chas.is.string,
+		age: chas.is.number,
+	},
+});
+
+const result1 = schemas.User.parse({ name: 'John', age: 30 });
+
+console.log(`isUser: ${result1.isOk()}`);
+
+type UserSchema = chas.InferSchema<typeof schemas.User>;
+
+const test8 = chas.is.schema(schemas.User)({ name: 'John', age: 30 });
+console.log(test8);

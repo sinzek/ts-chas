@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Task } from '../src/task.js';
-import { errAsync, ResultAsync, ok, type Result } from '../src/result.js';
+import { errAsync, ResultAsync, ok, type Result, okAsync } from '../src/result.js';
 
 describe('Task', () => {
 	it('creates a Task from a successful promise', async () => {
@@ -264,6 +264,28 @@ describe('Task', () => {
 			await Promise.all([worker.execute(), worker.execute(), worker.execute(), worker.execute()]);
 
 			expect(maxActive).toBe(2);
+		});
+
+		it('delay() delays execution', async () => {
+			let executed = false;
+			const task = new Task(() => {
+				executed = true;
+
+				return okAsync(2);
+			}).delay(500);
+			expect(executed).toBe(false);
+			const start = Date.now();
+			await task.execute();
+			expect(executed).toBe(true);
+			expect(Date.now() - start).toBeGreaterThanOrEqual(500);
+		});
+
+		it('supports async function in constructor', async () => {
+			const task = new Task(async () => {
+				return ok(42);
+			});
+			const result = await task.execute();
+			expect(result.unwrap()).toBe(42);
 		});
 	});
 
