@@ -209,49 +209,49 @@ describe('chas', () => {
 			expect(chas.err('error').match({ ok: (v: number) => v + 1, err: e => e.length })).toBe(5);
 		});
 
-		it('inspect', () => {
+		it('tap', () => {
 			let value = 0;
-			chas.ok(5).inspect(v => (value = v));
+			chas.ok(5).tap(v => (value = v));
 			expect(value).toBe(5);
 
 			let errValue = 0;
-			chas.err('error').inspect(v => (errValue = v));
+			chas.err('error').tap(v => (errValue = v));
 			expect(errValue).toBe(0);
 		});
 
-		it('asyncInspect', async () => {
+		it('asynctap', async () => {
 			let value = 0;
-			await chas.ok(5).asyncInspect(async v => {
+			await chas.ok(5).asynctap(async v => {
 				value = v;
 			});
 			expect(value).toBe(5);
 
 			let errValue = 0;
-			await chas.err('error').asyncInspect(async v => {
+			await chas.err('error').asynctap(async v => {
 				errValue = v as unknown as number; // just cast or ignore it for none branch
 			});
 			expect(errValue).toBe(0);
 		});
 
-		it('inspectErr', () => {
+		it('tapErr', () => {
 			let value = '';
-			chas.err('error').inspectErr(e => (value = e));
+			chas.err('error').tapErr(e => (value = e));
 			expect(value).toBe('error');
 
 			let okValue = '';
-			chas.ok(5).inspectErr(e => (okValue = e));
+			chas.ok(5).tapErr(e => (okValue = e));
 			expect(okValue).toBe('');
 		});
 
-		it('asyncInspectErr', async () => {
+		it('asynctapErr', async () => {
 			let value = '';
-			await chas.err('error').asyncInspectErr(async e => {
+			await chas.err('error').asynctapErr(async e => {
 				value = e;
 			});
 			expect(value).toBe('error');
 
 			let okValue = '';
-			await chas.ok(5).asyncInspectErr(async e => {
+			await chas.ok(5).asynctapErr(async e => {
 				okValue = e as unknown as string;
 			});
 			expect(okValue).toBe('');
@@ -367,41 +367,41 @@ describe('chas', () => {
 			expect((await res3).unwrapErr()).toBe('error');
 		});
 
-		it('inspect', async () => {
+		it('tap', async () => {
 			let value = 0;
-			await chas.okAsync(5).inspect(v => {
+			await chas.okAsync(5).tap(v => {
 				value = v;
 			});
 			expect(value).toBe(5);
 
 			let errValue = 0;
-			await chas.errAsync('error').inspect(v => {
+			await chas.errAsync('error').tap(v => {
 				errValue = v as unknown as number;
 			});
 			expect(errValue).toBe(0);
 
 			let asyncVal = 0;
-			await chas.okAsync(5).inspect(async v => {
+			await chas.okAsync(5).tap(async v => {
 				asyncVal = v;
 			});
 			expect(asyncVal).toBe(5);
 		});
 
-		it('inspectErr', async () => {
+		it('tapErr', async () => {
 			let value = '';
-			await chas.errAsync('error').inspectErr(e => {
+			await chas.errAsync('error').tapErr(e => {
 				value = e;
 			});
 			expect(value).toBe('error');
 
 			let okValue = '';
-			await chas.okAsync(5).inspectErr(e => {
+			await chas.okAsync(5).tapErr(e => {
 				okValue = e as unknown as string;
 			});
 			expect(okValue).toBe('');
 
 			let asyncStr = '';
-			await chas.errAsync('error').inspectErr(async e => {
+			await chas.errAsync('error').tapErr(async e => {
 				asyncStr = e;
 			});
 			expect(asyncStr).toBe('error');

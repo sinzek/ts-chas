@@ -83,7 +83,7 @@ describe('Namespace Structure', () => {
 			expect(Guard.assert).toBeDefined();
 			expect(Guard.ensure).toBeDefined();
 			expect(Guard.is).toBeDefined();
-			expect(Guard.is.tagged).toBeDefined();
+			expect(Guard.is.taggedErr).toBeDefined();
 		});
 	});
 });

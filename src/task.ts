@@ -407,13 +407,13 @@ export class Task<T, E> {
 			}
 
 			return this.run(ctx)
-				.inspect(() => {
+				.tap(() => {
 					if (state === 'HALF_OPEN') {
 						state = 'CLOSED';
 						failures = 0;
 					}
 				})
-				.inspectErr(() => {
+				.tapErr(() => {
 					failures++;
 					lastFailureTime = Date.now();
 					if (failures >= options.threshold) {
@@ -529,12 +529,12 @@ export class Task<T, E> {
 	 *
 	 * @example
 	 * ```ts
-	 * const task = chas.Task.from(() => Promise.resolve(1)).inspect(v => console.log(v));
+	 * const task = chas.Task.from(() => Promise.resolve(1)).tap(v => console.log(v));
 	 * const result = await task.execute(); // Ok(1)
 	 * ```
 	 */
-	inspect(fn: (value: T) => void | Promise<void>): Task<T, E> {
-		return new Task(ctx => this.run(ctx).inspect(fn));
+	tap(fn: (value: T) => void | Promise<void>): Task<T, E> {
+		return new Task(ctx => this.run(ctx).tap(fn));
 	}
 
 	/**
@@ -545,12 +545,12 @@ export class Task<T, E> {
 	 *
 	 * @example
 	 * ```ts
-	 * const task = chas.Task.from(() => Promise.resolve(1)).inspectErr(e => console.log(e));
+	 * const task = chas.Task.from(() => Promise.resolve(1)).tapErr(e => console.log(e));
 	 * const result = await task.execute(); // Ok(1)
 	 * ```
 	 */
-	inspectErr(fn: (error: E) => void | Promise<void>): Task<T, E> {
-		return new Task(ctx => this.run(ctx).inspectErr(fn));
+	tapErr(fn: (error: E) => void | Promise<void>): Task<T, E> {
+		return new Task(ctx => this.run(ctx).tapErr(fn));
 	}
 
 	/**

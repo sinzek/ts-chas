@@ -2,6 +2,7 @@ import type { TaggedErr } from './tagged-errs.js';
 import type { None, Option, Some } from './option.js';
 import { err, ok, ResultAsync, type Err, type Ok, type Result } from './result.js';
 import { Task } from './task.js';
+import { type UnionToIntersection } from './utils.js';
 
 /**
  * A guard is a function that returns true if the value is of the specified type (or satisfies a set of conditions) and narrows the type of the value.
@@ -27,7 +28,14 @@ import { Task } from './task.js';
  * // result is now typed as Result<string, Error>
  * ```
  */
-export type Guard<T> = (value: unknown) => value is T;
+export type Guard<T> = ((value: unknown) => value is T) & {
+	/**
+	 * @internal Optional metadata for the guard (used by `validate` and other parsing utils).
+	 */
+	readonly meta?: {
+		errorMsg?: string;
+	};
+};
 
 /**
  * Extracts the type from a guard.
@@ -36,17 +44,491 @@ export type Guard<T> = (value: unknown) => value is T;
 type GuardType<T> = T extends Guard<infer U> ? U : never;
 
 /**
+ * Specialized helpers and factory types for core guards.
+ * @internal
+ */
+type StringHelpers = {
+	/**
+	 * Checks if the string is not empty.
+	 */
+	readonly nonEmpty: ChainableStringGuard;
+	/**
+	 * Checks if the string is empty.
+	 */
+	readonly empty: ChainableStringGuard;
+	/**
+	 * Checks if the string is a valid email address (RFC 5322).
+	 */
+	readonly email: ChainableStringGuard;
+	/**
+	 * Checks if the string is a valid hex color.
+	 */
+	readonly hexColor: ChainableStringGuard;
+	/**
+	 * Checks if the string is a valid URL.
+	 */
+	readonly url: ChainableStringGuard;
+	/**
+	 * Checks if the string contains only alphanumeric characters.
+	 */
+	readonly alphanumeric: ChainableStringGuard;
+	/**
+	 * Checks if the string has a specific length or a length within a range.
+	 * @param min The minimum length (or exact length if max is not provided).
+	 * @param max The maximum length (optional).
+	 */
+	readonly length: (min: number, max?: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string has a length greater than the specified value.
+	 * @param n The minimum length.
+	 */
+	readonly lengthGt: (n: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string has a length greater than or equal to the specified value.
+	 * @param n The minimum length.
+	 */
+	readonly lengthGte: (n: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string has a length less than the specified value.
+	 * @param n The maximum length.
+	 */
+	readonly lengthLt: (n: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string has a length less than or equal to the specified value.
+	 * @param n The maximum length.
+	 */
+	readonly lengthLte: (n: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string matches the specified regular expression.
+	 * @param regex The regular expression to match.
+	 */
+	readonly regex: (regex: RegExp) => ChainableStringGuard;
+	/**
+	 * Adds a custom predicate to the string guard.
+	 * @param predicate The predicate to check against.
+	 */
+	readonly where: (predicate: (value: string) => boolean) => ChainableStringGuard;
+	/**
+	 * Checks if the string is a valid UUID.
+	 * @param version The UUID version to check for (v1-v8).
+	 */
+	readonly uuid: (version?: 'v1' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8') => ChainableStringGuard;
+	/**
+	 * Checks if the string starts with the specified prefix.
+	 * @param prefix The prefix to check for.
+	 */
+	readonly startsWith: (prefix: string) => ChainableStringGuard;
+	/**
+	 * Checks if the string ends with the specified suffix.
+	 * @param suffix The suffix to check for.
+	 */
+	readonly endsWith: (suffix: string) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes the specified substring.
+	 * @param substring The substring to check for.
+	 */
+	readonly includes: (substring: string) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes any of the specified substrings.
+	 * @param substrings The substrings to check for.
+	 */
+	readonly includesAny: (substrings: string[]) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes all of the specified substrings.
+	 * @param substrings The substrings to check for.
+	 */
+	readonly includesAll: (substrings: string[]) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes none of the specified substrings.
+	 * @param substrings The substrings to check for.
+	 */
+	readonly includesNone: (substrings: string[]) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes only the specified substrings.
+	 * @param substrings The substrings to check for.
+	 */
+	readonly includesOnly: (substrings: string[]) => ChainableStringGuard;
+
+	/**
+	 * Checks if the string includes spaces.
+	 * @param minSpaces The minimum number of spaces.
+	 * @param maxSpaces The maximum number of spaces.
+	 */
+	readonly spaces: (minSpaces?: number, maxSpaces?: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes symbols.
+	 * @param minSymbols The minimum number of symbols.
+	 * @param maxSymbols The maximum number of symbols.
+	 */
+	readonly symbols: (minSymbols?: number, maxSymbols?: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes numbers.
+	 * @param minNumbers The minimum number of numbers.
+	 * @param maxNumbers The maximum number of numbers.
+	 */
+	readonly numbers: (minNumbers?: number, maxNumbers?: number) => ChainableStringGuard;
+	/**
+	 * Checks if the string includes letters.
+	 * @param type The type of letters to check for.
+	 * @param minLetters The minimum number of letters.
+	 * @param maxLetters The maximum number of letters.
+	 */
+	readonly letters: (
+		type?: 'uppercase' | 'lowercase' | 'mixedcase',
+		minLetters?: number,
+		maxLetters?: number
+	) => ChainableStringGuard;
+};
+
+type NumberHelpers = {
+	/**
+	 * Checks if the number is greater than the specified value.
+	 * @param n The value to compare against.
+	 */
+	readonly gt: (n: number) => ChainableNumberGuard;
+	/**
+	 * Checks if the number is greater than or equal to the specified value.
+	 * @param n The value to compare against.
+	 */
+	readonly gte: (n: number) => ChainableNumberGuard;
+	/**
+	 * Checks if the number is less than the specified value.
+	 * @param n The value to compare against.
+	 */
+	readonly lt: (n: number) => ChainableNumberGuard;
+	/**
+	 * Checks if the number is less than or equal to the specified value.
+	 * @param n The value to compare against.
+	 */
+	readonly lte: (n: number) => ChainableNumberGuard;
+	/**
+	 * Checks if the number is between the specified values.
+	 * @param min The minimum value.
+	 * @param max The maximum value.
+	 */
+	readonly between: (min: number, max: number) => ChainableNumberGuard;
+	/**
+	 * Checks if the number is positive.
+	 */
+	readonly positive: ChainableNumberGuard;
+	/**
+	 * Checks if the number is negative.
+	 */
+	readonly negative: ChainableNumberGuard;
+	/**
+	 * Checks if the number is even.
+	 */
+	readonly even: ChainableNumberGuard;
+	/**
+	 * Checks if the number is odd.
+	 */
+	readonly odd: ChainableNumberGuard;
+	/**
+	 * Checks if the number is an integer.
+	 */
+	readonly integer: ChainableNumberGuard;
+	/**
+	 * Checks if the number is a float (not an integer and not NaN)
+	 */
+	readonly float: ChainableNumberGuard;
+	/**
+	 * Adds a custom predicate to the number guard.
+	 * @param predicate The predicate to check against.
+	 */
+	readonly where: (predicate: (value: number) => boolean) => ChainableNumberGuard;
+};
+
+type ArrayHelpers<T> = {
+	/**
+	 * Checks if the array has a minimum length.
+	 * @param n The minimum length.
+	 */
+	readonly min: (n: number) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array has a maximum length.
+	 * @param n The maximum length.
+	 */
+	readonly max: (n: number) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array has a specific length.
+	 * @param n The length.
+	 */
+	readonly size: (n: number) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array is not empty.
+	 */
+	readonly nonEmpty: ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array is empty.
+	 */
+	readonly empty: ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array has unique elements.
+	 */
+	readonly unique: ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array includes the specified item.
+	 * @param item The item to check for.
+	 */
+	readonly includes: (item: any) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array excludes the specified item.
+	 * @param item The item to check for.
+	 */
+	readonly excludes: (item: any) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array includes all of the specified items.
+	 * @param items The items to check for.
+	 */
+	readonly includesAll: (items: any[]) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array includes any of the specified items.
+	 * @param items The items to check for.
+	 */
+	readonly includesAny: (items: any[]) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array includes none of the specified items.
+	 * @param items The items to check for.
+	 */
+	readonly includesNone: (items: any[]) => ChainableArrayGuard<T>;
+	/**
+	 * Checks if the array includes only the specified items.
+	 * @param items The items to check for.
+	 */
+	/**
+	 * Checks if the array includes only the specified items.
+	 * @param items The items to check for.
+	 */
+	readonly includesOnly: (items: any[]) => ChainableArrayGuard<T>;
+	/**
+	 * Adds a custom predicate to the array guard.
+	 * @param predicate The predicate to check against.
+	 */
+	readonly where: (predicate: (value: T[]) => boolean) => ChainableArrayGuard<T>;
+};
+
+type ObjectHelpers<T extends Record<string, any>> = {
+	/**
+	 * Checks if the object has the specified property.
+	 * @param key The property to check for.
+	 */
+	readonly has: (key: keyof T) => ChainableObjectGuard<T>;
+	/**
+	 * Checks if the object does not have the specified property.
+	 * @param key The property to check for.
+	 */
+	readonly notHas: (key: keyof T) => ChainableObjectGuard<T>;
+	/**
+	 * Checks if the object has all of the specified properties.
+	 * @param keys The properties to check for.
+	 */
+	readonly hasAll: (keys: (keyof T)[]) => ChainableObjectGuard<T>;
+	/**
+	 * Checks if the object has any of the specified properties.
+	 * @param keys The properties to check for.
+	 */
+	readonly hasAny: (keys: (keyof T)[]) => ChainableObjectGuard<T>;
+	/**
+	 * Checks if the object has none of the specified properties.
+	 * @param keys The properties to check for.
+	 */
+	readonly hasNone: (keys: (keyof T)[]) => ChainableObjectGuard<T>;
+	/**
+	 * Checks if the object has only the specified properties.
+	 * @param keys The properties to check for.
+	 */
+	readonly hasOnly: (keys: (keyof T)[]) => ChainableObjectGuard<T>;
+	/**
+	 * Adds a custom predicate to the object guard.
+	 * @param predicate The predicate to check against.
+	 */
+	readonly where: (predicate: (value: T) => boolean) => ChainableObjectGuard<T>;
+};
+
+type DateHelpers = {
+	/**
+	 * Checks if the date is before the specified date.
+	 * @param date The date to compare against.
+	 */
+	readonly before: (date: Date) => ChainableDateGuard;
+	/**
+	 * Checks if the date is after the specified date.
+	 * @param date The date to compare against.
+	 */
+	readonly after: (date: Date) => ChainableDateGuard;
+	/**
+	 * Checks if the date is between the specified dates.
+	 * @param min The minimum date.
+	 * @param max The maximum date.
+	 */
+	readonly between: (min: Date, max: Date) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a weekend (Saturday or Sunday).
+	 */
+	readonly weekend: ChainableDateGuard;
+	/**
+	 * Checks if the date is a weekday (Monday through Friday).
+	 */
+	readonly weekday: ChainableDateGuard;
+	/**
+	 * Adds a custom predicate to the date guard.
+	 * @param predicate The predicate to check against.
+	 */
+	readonly where: (predicate: (value: Date) => boolean) => ChainableDateGuard;
+};
+
+type BooleanHelpers = {
+	/**
+	 * Checks if the value is strictly true.
+	 */
+	readonly true: ChainableBooleanGuard;
+	/**
+	 * Checks if the value is strictly false.
+	 */
+	readonly false: ChainableBooleanGuard;
+	/**
+	 * Adds a custom predicate to the boolean guard.
+	 * @param predicate The predicate to check against.
+	 */
+	readonly where: (predicate: (value: boolean) => boolean) => ChainableBooleanGuard;
+};
+
+type ChainableStringGuard = Guard<string> & StringHelpers;
+type ChainableNumberGuard = Guard<number> & NumberHelpers;
+type ChainableArrayGuard<T> = Guard<T[]> & ArrayHelpers<T>;
+type ChainableObjectGuard<T extends Record<string, any>> = Guard<T> & ObjectHelpers<T>;
+type ChainableDateGuard = Guard<Date> & DateHelpers;
+type ChainableBooleanGuard = Guard<boolean> & BooleanHelpers;
+
+type ArrayFactory = {
+	<T>(inner?: Guard<T>): ChainableArrayGuard<T>;
+} & ArrayHelpers<any>;
+
+type ObjectFactory = {
+	<T extends Record<string, any>>(shape?: { [K in keyof T]: Guard<T[K]> }): ChainableObjectGuard<T>;
+} & ObjectHelpers<any>;
+
+/**
  * Helper to identify a factory produced by the errors() utility.
  * It identifies any object/function that has an .is guard.
  * @internal
  */
 type ErrorFactory<T = any> = { is: Guard<T> };
 
+/**
+ * Creates a chainable guard by wrapping a base guard and attaching helpers.
+ * @internal
+ */
+function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T & H {
+	// strictly include helper names that are factories
+	const factoryHelpers: Record<string, true> = {
+		length: true,
+		lengthGt: true,
+		lengthGte: true,
+		lengthLt: true,
+		lengthLte: true,
+		regex: true,
+		where: true,
+		uuid: true,
+		startsWith: true,
+		endsWith: true,
+		includes: true,
+		includesAny: true,
+		includesAll: true,
+		includesNone: true,
+		includesOnly: true,
+		spaces: true,
+		symbols: true,
+		numbers: true,
+		letters: true,
+		gt: true,
+		gte: true,
+		lt: true,
+		lte: true,
+		between: true,
+		min: true,
+		max: true,
+		size: true,
+		excludes: true,
+		has: true,
+		notHas: true,
+		hasAll: true,
+		hasAny: true,
+		hasNone: true,
+		hasOnly: true,
+		before: true,
+		after: true,
+	};
+
+	const createProxy = (target: any, currentHelpers: Record<string, any>): any => {
+		return new Proxy(target, {
+			apply(target, thisArg, argArray) {
+				const result = Reflect.apply(target, thisArg, argArray);
+				if (typeof result === 'function') {
+					return createProxy(result, currentHelpers);
+				}
+				return result;
+			},
+			get(target, prop: string) {
+				if (prop in currentHelpers) {
+					const helper = currentHelpers[prop];
+
+					// Specialized override: spaces on alphanumeric should allow spaces in the base check
+					if (prop === 'spaces' && (target as any)._isAlphanumeric) {
+						return (...args: any[]) => {
+							const nextGuard = helper(...args);
+							return createProxy(
+								((v: unknown) =>
+									typeof v === 'string' && /^[a-z0-9\s]*$/i.test(v) && nextGuard(v)) as any,
+								currentHelpers
+							);
+						};
+					}
+
+					if (prop in factoryHelpers) {
+						return (...args: any[]) => {
+							const nextGuard = helper(...args);
+							return createProxy(
+								((v: unknown) => target(v) && nextGuard(v)) as Guard<any>,
+								currentHelpers
+							);
+						};
+					}
+
+					const nextHelpers = { ...currentHelpers, ...helper };
+					const nextGuard = ((v: unknown) => target(v) && (helper as Guard<any>)(v)) as any;
+					if (prop === 'alphanumeric') nextGuard._isAlphanumeric = true;
+					return createProxy(nextGuard, nextHelpers);
+				}
+
+				if (prop in target) return (target as any)[prop];
+				return undefined;
+			},
+		});
+	};
+
+	return createProxy(base, helpers);
+}
+
 const RGX = {
 	email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
 	hex: /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/,
 	url: /^https?:\/\/[^\s/$.?#].[^\s]*$/,
-	alphanumeric: { base: /^[a-z0-9]+$/i, withSpaces: /^[a-z0-9\s]+$/i },
+	alphanumeric: { base: /^[a-z0-9]+$/i },
+	symbols: { base: /^[^a-zA-Z0-9]+$/ },
+	numbers: { base: /^\d+$/ },
+	letters: { uppercase: /^[A-Z]+$/, lowercase: /^[a-z]+$/, mixedcase: /^[a-zA-Z]+$/ },
+	uuid: {
+		v1: /^[0-9a-f]{8}-[0-9a-f]{4}-1[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		v2: /^[0-9a-f]{8}-[0-9a-f]{4}-2[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		v3: /^[0-9a-f]{8}-[0-9a-f]{4}-3[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		v4: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		v5: /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		v6: /^[0-9a-f]{8}-[0-9a-f]{4}-6[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		v7: /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		v8: /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		all: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[8ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+	},
 };
 
 /**
@@ -61,7 +543,7 @@ interface TaggedFn {
 	 *
 	 * @example
 	 * ```ts
-	 * if (is.tagged(AppError.NotFound)(value)) {
+	 * if (is.taggedErr(AppError.NotFound)(value)) {
 	 *   console.log(value.resource); // value is now typed as TaggedErr & { _tag: 'NotFound' } & (whatever other properties the factory provides)
 	 * }
 	 * ```
@@ -75,17 +557,13 @@ interface TaggedFn {
 	 *
 	 * @example
 	 * ```ts
-	 * if (is.tagged('NotFound')(value)) {
+	 * if (is.taggedErr('NotFound')(value)) {
 	 *   console.log(value.resource); // value is now typed as TaggedErr & { _tag: 'NotFound' } & (whatever other properties the factory with this tag provides)
 	 * }
 	 * ```
 	 */
 	<Tag extends string>(tag: Tag, inner?: Guard<any>): Guard<TaggedErr & { readonly _tag: Tag }>;
 }
-
-type IsApi = Omit<typeof implementation, 'tagged'> & {
-	readonly tagged: TaggedFn;
-};
 
 const implementation = {
 	/**
@@ -104,23 +582,75 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	string: Object.assign((v => typeof v === 'string') as Guard<string>, {
-		/** Checks if a value is a non-empty string. */
-		nonEmpty: (v => typeof v === 'string' && v.trim().length > 0) as Guard<string>,
-		/** Checks if a value is an empty string. */
-		empty: (v => typeof v === 'string' && v.trim().length === 0) as Guard<string>,
-		/** Checks if a value is an email address. */
-		email: (v => typeof v === 'string' && RGX.email.test(v)) as Guard<string>,
-		/** Checks if a value is a hex color. */
-		hexColor: (v => typeof v === 'string' && RGX.hex.test(v)) as Guard<string>,
-		/** Checks if a value is a URL. */
-		url: (v => typeof v === 'string' && RGX.url.test(v)) as Guard<string>,
-		/** Checks if a value is an alphanumeric string. */
-		alphanumeric: Object.assign((v => typeof v === 'string' && RGX.alphanumeric.base.test(v)) as Guard<string>, {
-			/** Checks if a value is an alphanumeric string with spaces. */
-			withSpaces: (v => typeof v === 'string' && RGX.alphanumeric.withSpaces.test(v)) as Guard<string>,
-		}),
-	}),
+	string: makeChainable(((v: unknown) => typeof v === 'string') as Guard<string>, {
+		nonEmpty: ((v: unknown) => typeof v === 'string' && v.trim().length > 0) as Guard<string>,
+		empty: ((v: unknown) => typeof v === 'string' && v.trim().length === 0) as Guard<string>,
+		email: ((v: unknown) => typeof v === 'string' && RGX.email.test(v)) as Guard<string>,
+		hexColor: ((v: unknown) => typeof v === 'string' && RGX.hex.test(v)) as Guard<string>,
+		url: ((v: unknown) => typeof v === 'string' && RGX.url.test(v)) as Guard<string>,
+		alphanumeric: Object.assign(
+			((v: unknown) => typeof v === 'string' && RGX.alphanumeric.base.test(v)) as Guard<string>,
+			{ _isAlphanumeric: true }
+		) as any as Guard<string>,
+		length: (min: number, max?: number) =>
+			((v: unknown) =>
+				typeof v === 'string' &&
+				(max ? v.length >= min && v.length <= max : v.length === min)) as Guard<string>,
+		lengthGt: (n: number) => ((v: unknown) => typeof v === 'string' && v.length > n) as Guard<string>,
+		lengthGte: (n: number) => ((v: unknown) => typeof v === 'string' && v.length >= n) as Guard<string>,
+		lengthLt: (n: number) => ((v: unknown) => typeof v === 'string' && v.length < n) as Guard<string>,
+		lengthLte: (n: number) => ((v: unknown) => typeof v === 'string' && v.length <= n) as Guard<string>,
+		regex: (regex: RegExp) => ((v: unknown) => typeof v === 'string' && regex.test(v)) as Guard<string>,
+		startsWith: (prefix: string) =>
+			((v: unknown) => typeof v === 'string' && v.startsWith(prefix)) as Guard<string>,
+		endsWith: (suffix: string) => ((v: unknown) => typeof v === 'string' && v.endsWith(suffix)) as Guard<string>,
+		includes: (substring: string) =>
+			((v: unknown) => typeof v === 'string' && v.includes(substring)) as Guard<string>,
+		includesAny: (substrings: string[]) =>
+			((v: unknown) => typeof v === 'string' && substrings.some(s => v.includes(s))) as Guard<string>,
+		includesAll: (substrings: string[]) =>
+			((v: unknown) => typeof v === 'string' && substrings.every(s => v.includes(s))) as Guard<string>,
+		spaces: (minSpaces: number = 1, maxSpaces: number = Infinity) =>
+			((v: unknown) =>
+				typeof v === 'string' &&
+				(v.match(/\s/g) ?? []).length >= minSpaces &&
+				(v.match(/\s/g) ?? []).length <= maxSpaces) as Guard<string>,
+		symbols: (minSymbols: number = 1, maxSymbols: number = Infinity) =>
+			((v: unknown) =>
+				typeof v === 'string' &&
+				(v.match(/[^a-zA-Z0-9\s]/g) ?? []).length >= minSymbols &&
+				(v.match(/[^a-zA-Z0-9\s]/g) ?? []).length <= maxSymbols) as Guard<string>,
+		numbers: (minNumbers: number = 1, maxNumbers: number = Infinity) =>
+			((v: unknown) =>
+				typeof v === 'string' &&
+				(v.match(/\d/g) ?? []).length >= minNumbers &&
+				(v.match(/\d/g) ?? []).length <= maxNumbers) as Guard<string>,
+		letters: (
+			type: 'uppercase' | 'lowercase' | 'mixedcase' = 'mixedcase',
+			minLetters: number = 1,
+			maxLetters: number = Infinity
+		) =>
+			((v: unknown) => {
+				if (typeof v !== 'string') return false;
+				let count = 0;
+				switch (type) {
+					case 'uppercase':
+						count = (v.match(/[A-Z]/g) ?? []).length;
+						break;
+					case 'lowercase':
+						count = (v.match(/[a-z]/g) ?? []).length;
+						break;
+					case 'mixedcase':
+						count = (v.match(/[A-Za-z]/g) ?? []).length;
+						break;
+				}
+				return count >= minLetters && count <= maxLetters;
+			}) as Guard<string>,
+		uuid: (version?: 'v1' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8') =>
+			((v: unknown) =>
+				typeof v === 'string' && (version ? RGX.uuid[version].test(v) : RGX.uuid.all.test(v))) as Guard<string>,
+		where: (predicate: (v: string) => boolean) => ((v: any) => predicate(v)) as Guard<string>,
+	}) as ChainableStringGuard,
 	/**
 	 * Checks if a value is a number.
 	 * @param value The value to check.
@@ -137,31 +667,32 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	number: Object.assign((v => typeof v === 'number' && Number.isFinite(v)) as Guard<number>, {
-		/** Checks if a value is greater than a given number. */
-		gt: (n: number): Guard<number> => (v => is.number(v) && v > n) as Guard<number>,
-		/** Checks if a value is greater than or equal to a given number. */
-		gte: (n: number): Guard<number> => (v => is.number(v) && v >= n) as Guard<number>,
-		/** Checks if a value is less than a given number. */
-		lt: (n: number): Guard<number> => (v => is.number(v) && v < n) as Guard<number>,
-		/** Checks if a value is less than or equal to a given number. */
-		lte: (n: number): Guard<number> => (v => is.number(v) && v <= n) as Guard<number>,
-		/** Checks if a value is between two given numbers. */
+	number: makeChainable(((v: unknown) => typeof v === 'number' && Number.isFinite(v)) as Guard<number>, {
+		/** Checks if a value is a number and is greater than a given number. */
+		gt: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v > n) as Guard<number>,
+		/** Checks if a value is a number and is greater than or equal to a given number. */
+		gte: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v >= n) as Guard<number>,
+		/** Checks if a value is a number and is less than a given number. */
+		lt: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v < n) as Guard<number>,
+		/** Checks if a value is a number and is less than or equal to a given number. */
+		lte: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v <= n) as Guard<number>,
+		/** Checks if a value is a number and is between two given numbers. */
 		between: (min: number, max: number): Guard<number> =>
-			(v => is.number(v) && v >= min && v <= max) as Guard<number>,
+			((v: unknown) => typeof v === 'number' && v >= min && v <= max) as Guard<number>,
 		/** Checks if a value is a positive number. */
-		positive: (v => is.number(v) && v > 0) as Guard<number>,
+		positive: ((v: unknown) => typeof v === 'number' && v > 0) as Guard<number>,
 		/** Checks if a value is a negative number. */
-		negative: (v => is.number(v) && v < 0) as Guard<number>,
+		negative: ((v: unknown) => typeof v === 'number' && v < 0) as Guard<number>,
 		/** Checks if a value is an even number. */
-		even: (v => is.number(v) && v % 2 === 0) as Guard<number>,
+		even: ((v: unknown) => typeof v === 'number' && v % 2 === 0) as Guard<number>,
 		/** Checks if a value is an odd number. */
-		odd: (v => is.number(v) && v % 2 !== 0) as Guard<number>,
+		odd: ((v: unknown) => typeof v === 'number' && v % 2 !== 0) as Guard<number>,
 		/** Checks if a value is an integer. */
-		integer: (v => is.number(v) && Number.isInteger(v)) as Guard<number>,
+		integer: ((v: unknown) => typeof v === 'number' && Number.isInteger(v)) as Guard<number>,
 		/** Checks if a value is a float. */
-		float: (v => is.number(v) && !Number.isInteger(v)) as Guard<number>,
-	}),
+		float: ((v: unknown) => typeof v === 'number' && !Number.isInteger(v) && !Number.isNaN(v)) as Guard<number>,
+		where: (predicate: (v: number) => boolean) => ((v: any) => predicate(v)) as Guard<number>,
+	}) as ChainableNumberGuard,
 	/**
 	 * Checks if a value is a boolean.
 	 * @param value The value to check.
@@ -178,7 +709,11 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	boolean: (v => typeof v === 'boolean') as Guard<boolean>,
+	boolean: makeChainable((v => typeof v === 'boolean') as Guard<boolean>, {
+		true: ((v: unknown) => v === true) as Guard<boolean>,
+		false: ((v: unknown) => v === false) as Guard<boolean>,
+		where: (predicate: (v: boolean) => boolean) => ((v: unknown) => typeof v === 'boolean' && predicate(v)) as Guard<boolean>,
+	}) as ChainableBooleanGuard,
 	/**
 	 * Checks if a value is a symbol.
 	 * @param value The value to check.
@@ -265,6 +800,40 @@ const implementation = {
 	 */
 	nil: (v => v == null) as Guard<null | undefined>,
 	/**
+	 * Checks if a value is null or passes the inner guard.
+	 * @param inner The guard to check.
+	 * @returns True if the value is null or passes the inner guard, false otherwise.
+	 *
+	 * @example
+	 * ```ts
+	 * import { is } from 'chas/guard';
+	 *
+	 * // Using a guard to narrow the type of a value
+	 * const value: unknown = null;
+	 * if (is.nullable(value)) {
+	 *   // value is now typed as null | undefined
+	 * }
+	 * ```
+	 */
+	nullable: <T>(inner: Guard<T>) => (v => v === null || inner(v)) as Guard<T | null>,
+	/**
+	 * Checks if a value is undefined or passes the inner guard.
+	 * @param inner The guard to check.
+	 * @returns True if the value is undefined or passes the inner guard, false otherwise.
+	 *
+	 * @example
+	 * ```ts
+	 * import { is } from 'chas/guard';
+	 *
+	 * // Using a guard to narrow the type of a value
+	 * const value: unknown = undefined;
+	 * if (is.optional(value)) {
+	 *   // value is now typed as undefined
+	 * }
+	 * ```
+	 */
+	optional: <T>(inner: Guard<T>) => (v => v === undefined || inner(v)) as Guard<T | undefined>,
+	/**
 	 * Checks if a value is a function.
 	 * @param value The value to check.
 	 * @returns True if the value is a function, false otherwise.
@@ -308,35 +877,50 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	array: Object.assign(
-		<T>(inner?: Guard<T>): Guard<T[]> => (v => Array.isArray(v) && (!inner || v.every(inner))) as Guard<T[]>,
+	array: makeChainable(
+		(<T>(inner?: Guard<T>) => (v => Array.isArray(v) && (!inner || v.every(inner))) as Guard<T[]>) as <T>(
+			inner?: Guard<T>
+		) => ChainableArrayGuard<T>,
 		{
-			/** Checks if an array has a minimum length. */
-			min: (n: number) => (v: any[]) => v.length >= n,
-			/** Checks if an array has a maximum length. */
-			max: (n: number) => (v: any[]) => v.length <= n,
-			/** Checks if an array has a specific length. */
-			size: (n: number) => (v: any[]) => v.length === n,
-			/** Checks if an array is not empty. */
-			nonEmpty: (v: any[]) => v.length > 0,
-			/** Checks if an array is empty. */
-			empty: (v: any[]) => v.length === 0,
-			/** Checks if an array contains only unique values. */
-			unique: (v: any[]) => new Set(v).size === v.length,
-			/** Checks if an array includes a specific item. */
-			includes: (v: any[]) => (item: any) => v.includes(item),
-			/** Checks if an array excludes a specific item. */
-			excludes: (v: any[]) => (item: any) => !v.includes(item),
-			/** Checks if an array includes all specified items. */
-			includesAll: (v: any[]) => (items: any[]) => items.every(item => v.includes(item)),
-			/** Checks if an array includes any of the specified items. */
-			includesAny: (v: any[]) => (items: any[]) => items.some(item => v.includes(item)),
-			/** Checks if an array includes none of the specified items. */
-			includesNone: (v: any[]) => (items: any[]) => items.every(item => !v.includes(item)),
-			/** Checks if an array includes only the specified items. */
-			includesOnly: (v: any[]) => (items: any[]) => v.every(item => items.includes(item)),
+			/** Checks if value is an array and has a minimum length. */
+			min: (n: number) => ((v: any[]) => Array.isArray(v) && v.length >= n) as Guard<any[]>,
+			/** Checks if value is an array and has a maximum length. */
+			max: (n: number) => ((v: any[]) => Array.isArray(v) && v.length <= n) as Guard<any[]>,
+			/** Checks if value is an array and has a specific length. */
+			size: (n: number) => ((v: any[]) => Array.isArray(v) && v.length === n) as Guard<any[]>,
+			/** Checks if value is an array and is not empty. */
+			nonEmpty: ((v: any[]) => Array.isArray(v) && v.length > 0) as Guard<any[]>,
+			/** Checks if value is an array and is empty. */
+			empty: ((v: any[]) => Array.isArray(v) && v.length === 0) as Guard<any[]>,
+			/** Checks if value is an array and contains only unique values. */
+			unique: ((v: any[]) => Array.isArray(v) && new Set(v).size === v.length) as Guard<any[]>,
+			/** Checks if value is an array and includes a specific item. */
+			includes: (item: any) => ((arr: any[]) => Array.isArray(arr) && arr.includes(item)) as Guard<any[]>,
+			/** Checks if value is an array and excludes a specific item. */
+			excludes: (item: any) => ((arr: any[]) => Array.isArray(arr) && !arr.includes(item)) as Guard<any[]>,
+			/** Checks if value is an array and includes all specified items. */
+			includesAll: (items: any[]) =>
+				((arr: any[]) => Array.isArray(arr) && items.every(item => arr.includes(item))) as Guard<any[]>,
+			/** Checks if value is an array and includes any of the specified items. */
+			includesAny: (items: any[]) =>
+				((arr: any[]) => Array.isArray(arr) && items.some(item => arr.includes(item))) as Guard<any[]>,
+			/** Checks if value is an array and includes none of the specified items. */
+			includesNone: (items: any[]) =>
+				((arr: any[]) => Array.isArray(arr) && items.every(item => !arr.includes(item))) as Guard<any[]>,
+			/** Checks if value is an array and includes only the specified items. */
+			includesOnly: (items: any[]) =>
+				((arr: any[]) => {
+					if (!Array.isArray(arr)) return false;
+					if (arr.length !== new Set(arr).size) return false;
+					const itemSet = new Set(items);
+					const arrSet = new Set(arr);
+					if (itemSet.size !== arrSet.size) return false;
+					for (const i of arrSet) if (!itemSet.has(i)) return false;
+					return true;
+				}) as Guard<any[]>,
+			where: (predicate: (v: any[]) => boolean) => ((v: any) => predicate(v)) as Guard<any[]>,
 		}
-	),
+	) as ArrayFactory,
 	/**
 	 * Checks if a value is an object.
 	 * @param value The value to check.
@@ -348,7 +932,7 @@ const implementation = {
 	 *
 	 * const value: unknown = { a: 1, b: 2 };
 	 * if (is.object()(value)) {
-	 *   // value is now typed as Record<string, unknown>
+	 *   // value is now typed as object
 	 * }
 	 * ```
 	 *
@@ -363,12 +947,25 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	object: <T extends object>(shape?: { [K in keyof T]: Guard<T[K]> }): Guard<T> =>
-		(v => {
-			if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-			if (!shape) return true;
-			return Object.entries(shape).every(([k, g]) => (g as any)((v as any)[k]));
-		}) as Guard<T>,
+	object: makeChainable(
+		<T extends Record<string, any>>(shape?: { [K in keyof T]: Guard<T[K]> }) =>
+			(v => {
+				if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+				if (!shape) return true;
+				return Object.entries(shape).every(([k, g]) => (g as any)((v as any)[k]));
+			}) as ChainableObjectGuard<T>,
+		{
+			has: <T = any>(key: keyof T) => ((v: any) => key in v) as Guard<T>,
+			notHas: <T = any>(key: keyof T) => ((v: any) => !(key in v)) as Guard<T>,
+			hasAll: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.every(key => key in v)) as Guard<T>,
+			hasAny: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.some(key => key in v)) as Guard<T>,
+			hasNone: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.every(key => !(key in v))) as Guard<T>,
+			hasOnly: <T = any>(keys: (keyof T)[]) =>
+				((v: any) =>
+					keys.every(key => key in v) &&
+					Object.keys(v).every(key => keys.includes(key as keyof T))) as Guard<T>,
+		}
+	) as ObjectFactory,
 	/**
 	 * Checks if a value is a partial object.
 	 * @param value The value to check.
@@ -441,38 +1038,42 @@ const implementation = {
 			return v.every((val, idx) => (guards[idx] as any)(val));
 		}) as Guard<T>,
 	/**
-	 * Checks if a value is one of the specified types.
+	 * Checks if a value satisfies one or more of the specified guards.
 	 * @param value The value to check.
-	 * @returns True if the value is one of the specified types, false otherwise.
+	 * @returns True if the value satisfies one of the specified guards, false otherwise.
 	 *
 	 * @example
 	 * ```ts
 	 * import { is } from 'chas/guard';
 	 *
 	 * const value: unknown = 1;
-	 * if (is.oneOf(is.string, is.number)(value)) {
+	 * if (is.anyOf(is.string, is.number)(value)) {
 	 *   // value is now typed as string | number
 	 * }
 	 * ```
 	 */
-	oneOf: <T extends Guard<any>[]>(...guards: T): Guard<GuardType<T[number]>> =>
+	anyOf: <T extends Guard<any>[]>(...guards: T): Guard<GuardType<T[number]>> =>
 		((v: unknown) => guards.some(g => g(v))) as any,
 	/**
-	 * Checks if a value is all of the specified types.
+	 * Checks if a value satisfies all of the specified guards.
 	 * @param value The value to check.
-	 * @returns True if the value is all of the specified types, false otherwise.
+	 * @returns True if the value satisfies all of the specified guards, false otherwise.
+	 *
+	 * Note: The narrowed type will collapse to `never` if the guards are not compatible.
+	 * `is.allOf(is.string, is.number)` will result in `never`.
 	 *
 	 * @example
 	 * ```ts
 	 * import { is } from 'chas/guard';
 	 *
-	 * const value: unknown = 1;
-	 * if (is.allOf(is.string, is.number)(value)) {
-	 *   // value is now typed as string | number
+	 * const value: unknown = { ok: true, world: 'world' };
+	 * if (is.allOf(is.object({ ok: is.boolean }), is.literal('hello'))(value)) {
+	 *   // value is now typed as { ok: boolean } & 'hello'
 	 * }
 	 * ```
 	 */
-	allOf: <T>(...guards: Guard<any>[]): Guard<T> => ((v: unknown) => guards.every(g => g(v))) as any,
+	allOf: <T extends Guard<any>[]>(...guards: T): Guard<UnionToIntersection<GuardType<T[number]>>> =>
+		((v: unknown) => guards.every(g => g(v))) as any,
 	/**
 	 * Checks if a value is a date.
 	 * @param value The value to check.
@@ -488,7 +1089,14 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	date: (v: unknown): v is Date => v instanceof Date && !isNaN(v.getTime()),
+	date: makeChainable((v: unknown): v is Date => v instanceof Date && !isNaN(v.getTime()), {
+		before: (date: Date) => ((v: unknown) => v instanceof Date && v < date) as Guard<Date>,
+		after: (date: Date) => ((v: unknown) => v instanceof Date && v > date) as Guard<Date>,
+		between: (min: Date, max: Date) => ((v: unknown) => v instanceof Date && v >= min && v <= max) as Guard<Date>,
+		weekend: ((v: unknown) => v instanceof Date && (v.getDay() === 0 || v.getDay() === 6)) as Guard<Date>,
+		weekday: ((v: unknown) => v instanceof Date && v.getDay() !== 0 && v.getDay() !== 6) as Guard<Date>,
+		where: (predicate: (v: Date) => boolean) => ((v: unknown) => v instanceof Date && predicate(v)) as Guard<Date>,
+	}) as ChainableDateGuard,
 	/**
 	 * Checks if a value is an Ok result.
 	 * @param value The value to check.
@@ -614,7 +1222,7 @@ const implementation = {
 	 * ```ts
 	 * import { is } from 'chas/guard';
 	 * const value: unknown = { _tag: 'UserError', message: 'error' };
-	 * if (is.tagged('UserError')(value)) {
+	 * if (is.taggedErr('UserError')(value)) {
 	 *   // value is now typed as { _tag: 'UserError', message: string, ...methods }
 	 * }
 	 * ```
@@ -623,12 +1231,12 @@ const implementation = {
 	 * ```ts
 	 * import { is } from 'chas/guard';
 	 * const value: unknown = { _tag: 'UserError', message: 'error' };
-	 * if (is.tagged(AppError.NotFound)(value)) {
+	 * if (is.taggedErr(AppError.NotFound)(value)) {
 	 *   // value is now typed as { _tag: 'UserError', message: string, ...methods }
 	 * }
 	 * ```
 	 */
-	tagged: (tagOrFactory: string | ErrorFactory, inner?: Guard<any>): Guard<any> => {
+	taggedErr: (tagOrFactory: string | ErrorFactory, inner?: Guard<any>): Guard<any> => {
 		return (v: any): v is any => {
 			if (typeof tagOrFactory !== 'string' && 'is' in tagOrFactory) {
 				return tagOrFactory.is(v) && (!inner || inner(v));
@@ -689,7 +1297,20 @@ const implementation = {
 	 * ```
 	 */
 	schema: <T>(s: { safeParse?: (v: unknown) => any; parse?: (v: unknown) => any }): Guard<T> =>
-		(v => s.safeParse?.(v).success || s.parse?.(v).success) as Guard<T>,
+		(v => {
+			if (typeof s.safeParse === 'function') {
+				return !!s.safeParse(v).success;
+			}
+			if (typeof s.parse === 'function') {
+				try {
+					s.parse(v);
+					return true;
+				} catch {
+					return false;
+				}
+			}
+			return false;
+		}) as Guard<T>,
 
 	/**
 	 * Checks if a value is a specific literal value.
@@ -712,21 +1333,21 @@ const implementation = {
 			v === val,
 
 	/**
-	 * Checks if a value is a union of types.
+	 * Checks if a value is a discriminated union.
 	 * @param value The value to check.
-	 * @returns True if the value is a union of types, false otherwise.
+	 * @returns True if the value is a discriminated union, false otherwise.
 	 *
 	 * @example
 	 * ```ts
 	 * import { is } from 'chas/guard';
 	 *
 	 * const value: unknown = 'hello';
-	 * if (is.union('hello', 'world')(value)) {
+	 * if (is.discUnion('hello', 'world')(value)) {
 	 *   // value is now typed as 'hello' | 'world'
 	 * }
 	 * ```
 	 */
-	union: <T extends object, K extends keyof T>(
+	discUnion: <T extends object, K extends keyof T>(
 		key: K,
 		mapping: { [V in T[K] & (string | number)]: Guard<Extract<T, { [P in K]: V }>> }
 	): Guard<T> =>
@@ -738,8 +1359,90 @@ const implementation = {
 		}) as Guard<T>,
 };
 
+export type IsApi<Ext = {}> = Omit<typeof implementation, 'taggedErr' | 'string' | 'number' | 'array'> & {
+	readonly string: ChainableStringGuard;
+	readonly number: ChainableNumberGuard;
+	readonly array: ArrayFactory;
+	readonly taggedErr: TaggedFn;
+	/**
+	 * Extends the guard API with a new sub-namespace.
+	 * @param namespace The name of the sub-namespace.
+	 * @param guards An object containing the new guards.
+	 * @returns A new IsApi instance that includes the extended guards.
+	 *
+	 * @example
+	 * ```ts
+	 * const myIs = is.extend('app', {
+	 *   validUser: (v: unknown): v is User => is.object({ id: is.string })(v),
+	 * });
+	 *
+	 * if (myIs.app.validUser(data)) { ... }
+	 * ```
+	 */
+	readonly extend: <N extends string, G extends Record<string, any>>(
+		namespace: N,
+		guards: G
+	) => IsApi<Ext & { readonly [K in N]: G }>;
+} & Ext & {
+		readonly [K in keyof typeof implementation]: (typeof implementation)[K] & {
+			/**
+			 * Adds a custom guard to the chain that satisfies the predicate (simply passes the type through the chain).
+			 * @param predicate The predicate to check against.
+			 * @returns A new guard that includes the custom guard.
+			 */
+			where: (
+				predicate: (value: GuardType<(typeof implementation)[K]>) => boolean
+			) => Guard<GuardType<(typeof implementation)[K]>>;
+		};
+	};
+
 /**
- * Type guard utilities for runtime type checking.
+ * Creates an IsApi instance.
+ * @internal
+ */
+function createIs<E extends Record<string, any> = {}>(base: any, extensions: E = {} as E): IsApi<E> {
+	const guardsWithUniversalChain: any = Object.fromEntries(
+		Object.entries(base).map(([key, value]) => {
+			if (typeof value === 'function') {
+				return [
+					key,
+					Object.assign(value, {
+						where: (predicate: (v: any) => boolean): Guard<any> => {
+							const originalGuard = value;
+							return ((input: any): input is any =>
+								originalGuard(input) && predicate(input)) as Guard<any>;
+						},
+					}),
+				];
+			}
+			return [key, value];
+		})
+	);
+
+	const instance = Object.assign(
+		/** Instance Check: is(value, Date) */
+		<T>(value: unknown, ctor: abstract new (...args: any[]) => T): value is T => value instanceof ctor,
+		guardsWithUniversalChain
+	);
+
+	instance.extend = <N extends string, G extends Record<string, any>>(namespace: N, guards: G) => {
+		return createIs(base, { ...extensions, [namespace]: guards });
+	};
+
+	return new Proxy(instance, {
+		get(target, prop: string) {
+			if (prop in target) return target[prop];
+			if (prop in extensions) return (extensions as any)[prop];
+			return undefined;
+		},
+	}) as IsApi<E>;
+}
+
+/**
+ * Type guard utilities for type narrowing and data validation. Includes a chainable API for common guards.
+ *
+ *
+ * All chained guards are combined with logical AND and short-circuit on failure.
  *
  * @example
  * ```ts
@@ -762,11 +1465,7 @@ const implementation = {
  * }
  * ```
  */
-export const is = Object.assign(
-	/** Instance Check: is(value, Date) */
-	<T>(value: unknown, ctor: abstract new (...args: any[]) => T): value is T => value instanceof ctor,
-	implementation
-) as IsApi;
+export const is = createIs(implementation);
 
 /**
  * Asserts that a value matches a guard, or throws.
@@ -886,11 +1585,16 @@ export type InferSchema<T> = T extends { parse: (value: unknown) => Result<infer
  *   User: {
  *     name: is.string,
  *     age: is.number,
+ *     address: is.object({
+ *       street: is.string,
+ *       city: is.string,
+ *       region: is.string,
+ *     }),
  *   },
  * });
  *
  * type User = InferSchema<typeof schemas.User>;
- * // User is now { name: string; age: number }
+ * // User is now { name: string; age: number; address: { street: string; city: string; region: string; } }
  * ```
  */
 export function defineSchemas<S extends Record<string, Record<string, Guard<any>>>>(
@@ -902,7 +1606,7 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 		 * @param value The value to parse.
 		 * @returns A Result containing the parsed value or an array of errors.
 		 */
-		parse: (value: unknown) => Result<InferSchema<S[K]>, string[]>;
+		parse: (value: unknown, error?: string) => Result<InferSchema<S[K]>, string[]>;
 		/**
 		 * Synchronously 'asserts' that a value matches the schema (throws if not).
 		 *
@@ -912,47 +1616,56 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 		 * @param value The value to assert.
 		 * @throws An error if the value does not match the schema.
 		 */
-		assert: (value: unknown) => value is InferSchema<S[K]>;
+		assert: (value: unknown, error?: string) => value is InferSchema<S[K]>;
 	};
 } {
-	return Object.fromEntries(
-		Object.entries(schemas).map(([schemaName, schema]) => {
-			return [
-				schemaName,
-				{
-					parse: (value: unknown) => {
-						if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-							return err([`${schemaName}: Expected an object but got ${typeof value}`]);
+	const compiledSchemas = Object.entries(schemas).map(([schemaName, schema]) => {
+		const entries = Object.entries(schema);
+		const entryCount = entries.length;
+
+		return [
+			schemaName,
+			{
+				parse: (value: unknown, error?: string) => {
+					if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+						return err([error || `${schemaName}: Expected an object but got ${typeof value}`]);
+					}
+					const errors: string[] = [];
+					for (let i = 0; i < entryCount; i++) {
+						const entry = entries[i]!;
+						const [key, guard] = entry;
+						const propertyValue = (value as any)[key];
+						if (!guard(propertyValue)) {
+							errors.push(
+								error ||
+									`${schemaName}.${key} failed validation: expected ${guard.name || 'condition'} but got ${JSON.stringify(propertyValue)}`
+							);
 						}
-						const errors: string[] = [];
-						for (const [key, guard] of Object.entries(schema)) {
-							const propertyValue = (value as any)[key];
-							if (!guard(propertyValue)) {
-								errors.push(
-									`${schemaName}.${key} failed validation: expected ${guard.toString()} but got ${JSON.stringify(propertyValue)}`
-								);
-							}
-						}
-						return errors.length === 0 ? ok(value as any) : err(errors);
-					},
-					assert: (value: unknown) => {
-						if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-							throw new Error(`${schemaName}: Expected an object but got ${typeof value}`);
-						}
-						for (const [key, guard] of Object.entries(schema)) {
-							const propertyValue = (value as any)[key];
-							if (!guard(propertyValue)) {
-								throw new Error(
-									`${schemaName}.${key} failed validation: expected ${guard.toString()} but got ${JSON.stringify(propertyValue)}`
-								);
-							}
-						}
-						return true;
-					},
+					}
+					return errors.length === 0 ? ok(value as any) : err(errors);
 				},
-			];
-		})
-	) as any;
+				assert: (value: unknown, error?: string) => {
+					if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+						throw new Error(error || `${schemaName}: Expected an object but got ${typeof value}`);
+					}
+					for (let i = 0; i < entryCount; i++) {
+						const entry = entries[i]!;
+						const [key, guard] = entry;
+						const propertyValue = (value as any)[key];
+						if (!guard(propertyValue)) {
+							throw new Error(
+								error ||
+									`${schemaName}.${key} failed validation: expected ${guard.name || 'condition'} but got ${JSON.stringify(propertyValue)}`
+							);
+						}
+					}
+					return true;
+				},
+			},
+		];
+	});
+
+	return Object.fromEntries(compiledSchemas) as any;
 }
 
 /**

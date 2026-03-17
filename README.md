@@ -28,10 +28,10 @@
     // Suspends if pending, returns value if Ok, throws to ErrorBoundary if Err
     const data = myResultAsync.readSuspense();
     ```
-- Developers can also perform side-effects within pipelines using utilities like `finally()` and `inspect()` without breaking method chains.
+- Developers can also perform side-effects within pipelines using utilities like `finally()` and `tap()` without breaking method chains.
     ```ts
     chas.ok(5)
-    	.inspect(console.log)
+    	.tap(console.log)
     	.map(v => v * 2)
     	.finally(closeConnection);
     ```
@@ -318,14 +318,14 @@ All `Result` objects have the following methods available:
 
 - `match({ ok, err })`: Executes `ok` if `Ok`, or `err` if `Err`, returning the result.
   `chas.ok(5).match({ ok: v => v * 2, err: () => 0 }); // 10`
-- `inspect(f)`: Calls `f(value)` if `Ok`, returning `this` unchanged.
-  `chas.ok(5).inspect(console.log); // Ok(5)`
-- `asyncInspect(f)`: Asynchronously calls `f(value)` if `Ok`, returning `ResultAsync<T, E>`.
-  `await chas.ok(5).asyncInspect(async v => await logToDb(v)); // Ok(5)`
-- `inspectErr(f)`: Calls `f(error)` if `Err`, returning `this` unchanged.
-  `chas.err('e').inspectErr(console.error); // Err('e')`
-- `asyncInspectErr(f)`: Asynchronously calls `f(error)` if `Err`, returning `ResultAsync<T, E>`.
-  `await chas.err('e').asyncInspectErr(async e => await submitError(e)); // Err('e')`
+- `tap(f)`: Calls `f(value)` if `Ok`, returning `this` unchanged.
+  `chas.ok(5).tap(console.log); // Ok(5)`
+- `asynctap(f)`: Asynchronously calls `f(value)` if `Ok`, returning `ResultAsync<T, E>`.
+  `await chas.ok(5).asynctap(async v => await logToDb(v)); // Ok(5)`
+- `tapErr(f)`: Calls `f(error)` if `Err`, returning `this` unchanged.
+  `chas.err('e').tapErr(console.error); // Err('e')`
+- `asynctapErr(f)`: Asynchronously calls `f(error)` if `Err`, returning `ResultAsync<T, E>`.
+  `await chas.err('e').asynctapErr(async e => await submitError(e)); // Err('e')`
 - `finally(f)`: Calls `f()` regardless of `Ok` or `Err`, returning `this` unchanged.
   `chas.ok(5).finally(closeConnection); // Ok(5)`
 
@@ -342,12 +342,12 @@ All `Result` objects have the following methods available:
 - `match({ ok: f, err: g })`: Asynchronously evaluates a match handler. Returns a `Promise<U | F>`.
 - `unwrap()`: Unwraps the instance, returning a native `Promise<T>` that resolves on `Ok` or rejects on `Err`.
 - `readSuspense()`: Synchronous unwrap designed strictly for React Suspense contexts. Throws the internal Promise if pending, throws the `E` error to the nearest Error Boundary if `Err`, or perfectly returns `T` if `Ok`.
-- `inspect(f)`: Validates an `Ok` value and executes a side-effect (can be synchronous or asynchronous), retaining the original type constraint without throwing `Promise` state away.
-  `fetchUser().inspect(u => logSync(u));`
-  `fetchUser().inspect(async u => await logToDb(u));`
-- `inspectErr(f)`: Validates an `Err` error and executes a side-effect (can be synchronous or asynchronous). Psses `ResultAsync<T, E>` through untouched.
-  `fetchUser().inspectErr(e => console.error(e));`
-  `fetchUser().inspectErr(async e => await submitErrorToSentry(e));`
+- `tap(f)`: Validates an `Ok` value and executes a side-effect (can be synchronous or asynchronous), retaining the original type constraint without throwing `Promise` state away.
+  `fetchUser().tap(u => logSync(u));`
+  `fetchUser().tap(async u => await logToDb(u));`
+- `tapErr(f)`: Validates an `Err` error and executes a side-effect (can be synchronous or asynchronous). Psses `ResultAsync<T, E>` through untouched.
+  `fetchUser().tapErr(e => console.error(e));`
+  `fetchUser().tapErr(async e => await submitErrorToSentry(e));`
 - `finally(f)`: Executes an asynchronous side-effect regardless of outcome, returning the original `ResultAsync`.
 - `swap()`: Swaps the `Ok` and `Err` branches asynchronously.
   `await chas.okAsync(5).swap(); // Err(5)`

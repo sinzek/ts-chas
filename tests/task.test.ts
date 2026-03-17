@@ -301,7 +301,7 @@ describe('Task', () => {
 			expect(res.unwrapErr()).toBe('A');
 		});
 
-		it('inspect and inspectErr call side effects', async () => {
+		it('tap and tapErr call side effects', async () => {
 			let success = false;
 			let failure = false;
 
@@ -309,7 +309,7 @@ describe('Task', () => {
 				async () => 1,
 				() => 'e'
 			)
-				.inspect(() => {
+				.tap(() => {
 					success = true;
 				})
 				.execute();
@@ -319,7 +319,7 @@ describe('Task', () => {
 				},
 				() => 'e'
 			)
-				.inspectErr(() => {
+				.tapErr(() => {
 					failure = true;
 				})
 				.execute();

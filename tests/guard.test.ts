@@ -98,7 +98,7 @@ describe('Guard Module', () => {
 		it('is.string.alphanumeric', () => {
 			expect(is.string.alphanumeric('abc123')).toBe(true);
 			expect(is.string.alphanumeric('abc 123')).toBe(false);
-			expect(is.string.alphanumeric.withSpaces('abc 123')).toBe(true);
+			expect(is.string.alphanumeric.spaces(1, 2)('abc 123')).toBe(true);
 		});
 	});
 
@@ -139,12 +139,12 @@ describe('Guard Module', () => {
 			expect(is.array.nonEmpty([1])).toBe(true);
 			expect(is.array.empty([])).toBe(true);
 			expect(is.array.unique([1, 2, 1])).toBe(false);
-			expect(is.array.includes([1, 2])(1)).toBe(true);
-			expect(is.array.excludes([1, 2])(3)).toBe(true);
-			expect(is.array.includesAll([1, 2, 3])([1, 2])).toBe(true);
-			expect(is.array.includesAny([1, 2, 3])([3, 4])).toBe(true);
-			expect(is.array.includesNone([1, 2, 3])([4, 5])).toBe(true);
-			expect(is.array.includesOnly([1, 2])([1, 1, 2])).toBe(true);
+			expect(is.array.includes(2)([1, 2, 3])).toBe(true);
+			expect(is.array.excludes(4)([1, 2, 3])).toBe(true);
+			expect(is.array.includesAll([1, 2])([1, 2, 3])).toBe(true);
+			expect(is.array.includesAny([3, 4])([1, 2, 3])).toBe(true);
+			expect(is.array.includesNone([4, 5])([1, 2, 3])).toBe(true);
+			expect(is.array.includesOnly([1, 2])([1, 1, 2])).toBe(false);
 		});
 
 		it('is.object', () => {
@@ -176,8 +176,8 @@ describe('Guard Module', () => {
 	});
 
 	describe('Logic Guards', () => {
-		it('is.oneOf', () => {
-			const guard = is.oneOf(is.string, is.number);
+		it('is.anyOf', () => {
+			const guard = is.anyOf(is.string, is.number);
 			expect(guard('a')).toBe(true);
 			expect(guard(1)).toBe(true);
 			expect(guard(true)).toBe(false);
@@ -198,9 +198,9 @@ describe('Guard Module', () => {
 			expect(guard('a')).toBe(false);
 		});
 
-		it('is.union', () => {
+		it('is.discUnion', () => {
 			type T = { type: 'a'; val: string } | { type: 'b'; val: number };
-			const guard = is.union<T, 'type'>('type', {
+			const guard = is.discUnion<T, 'type'>('type', {
 				a: is.object({ type: is.literal('a'), val: is.string }),
 				b: is.object({ type: is.literal('b'), val: is.number }),
 			});
@@ -253,12 +253,12 @@ describe('Guard Module', () => {
 			expect(guard({ ok: false, error: undefined })).toBe(true);
 		});
 
-		it('is.tagged', () => {
-			expect(is.tagged('Error')({ _tag: 'Error' })).toBe(true);
-			expect(is.tagged('Error')({ _tag: 'Other' })).toBe(false);
+		it('is.taggedErr', () => {
+			expect(is.taggedErr('Error')({ _tag: 'Error' })).toBe(true);
+			expect(is.taggedErr('Error')({ _tag: 'Other' })).toBe(false);
 
 			const factory = { is: (v: any): v is { _tag: 'F' } => v?._tag === 'F' };
-			expect(is.tagged(factory)({ _tag: 'F' })).toBe(true);
+			expect(is.taggedErr(factory)({ _tag: 'F' })).toBe(true);
 		});
 
 		it('is.schema', () => {
@@ -358,6 +358,46 @@ describe('Guard Module', () => {
 			expect(Guard.validate).toBeDefined();
 			expect(Guard.toValidator).toBeDefined();
 			expect(Guard.toTask).toBeDefined();
+		});
+	});
+
+	describe('Chainable Object Guards', () => {
+		it('should chain has', () => {
+			const guard = is.object().has('a');
+			expect(guard({ a: 1 })).toBe(true);
+			expect(guard({})).toBe(false);
+		});
+
+		it('should chain notHas', () => {
+			const guard = is.object().notHas('a');
+			expect(guard({ a: 1 })).toBe(false);
+			expect(guard({ b: 2 })).toBe(true);
+		});
+
+		it('should chain hasAll', () => {
+			const guard = is.object().hasAll(['a', 'b']);
+			expect(guard({ a: 1, b: 's' })).toBe(true);
+			expect(guard({ a: 1 })).toBe(false);
+		});
+
+		it('should chain hasAny', () => {
+			const guard = is.object().hasAny(['a', 'b']);
+			expect(guard({ a: 1 })).toBe(true);
+			expect(guard({ b: 's' })).toBe(true);
+			expect(guard({})).toBe(false);
+		});
+
+		it('should chain hasNone', () => {
+			const guard = is.object().hasNone(['a', 'b']);
+			expect(guard({ a: 1, b: 's' })).toBe(false);
+			expect(guard({ c: 3 })).toBe(true);
+		});
+
+		it('should chain hasOnly', () => {
+			const guard = is.object().hasOnly(['a', 'b']);
+			expect(guard({ a: 1, b: 's' })).toBe(true);
+			expect(guard({ a: 1, b: 's', c: 3 })).toBe(false);
+			expect(guard({ a: 1 })).toBe(false);
 		});
 	});
 });

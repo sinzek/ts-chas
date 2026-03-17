@@ -488,10 +488,10 @@ export interface ResultMethods<T, E> {
 	 *
 	 * @example
 	 * ```ts
-	 * chas.ok(5).inspect(v => console.log('Value:', v)); // logs 5
+	 * chas.ok(5).tap(v => console.log('Value:', v)); // logs 5
 	 * ```
 	 */
-	readonly inspect: (f: (value: T) => void) => this;
+	readonly tap: (f: (value: T) => void) => this;
 
 	/**
 	 * Calls the provided closure with the `Err` value if the result is `Err`, otherwise does nothing.
@@ -502,10 +502,10 @@ export interface ResultMethods<T, E> {
 	 *
 	 * @example
 	 * ```ts
-	 * chas.err('error').inspectErr(e => console.error('Failed:', e));
+	 * chas.err('error').tapErr(e => console.error('Failed:', e));
 	 * ```
 	 */
-	readonly inspectErr: (f: (error: E) => void) => this;
+	readonly tapErr: (f: (error: E) => void) => this;
 
 	/**
 	 * Calls the provided closure with the `Ok` value asynchronously if the result is `Ok`.
@@ -514,7 +514,7 @@ export interface ResultMethods<T, E> {
 	 * @param f The async side-effect closure to call.
 	 * @returns A `ResultAsync` wrapping the unmodified original result.
 	 */
-	readonly asyncInspect: (f: (value: T) => Promise<void>) => ResultAsync<T, E>;
+	readonly asynctap: (f: (value: T) => Promise<void>) => ResultAsync<T, E>;
 
 	/**
 	 * Calls the provided closure with the `Err` error asynchronously if the result is `Err`.
@@ -523,7 +523,7 @@ export interface ResultMethods<T, E> {
 	 * @param f The async side-effect closure to call.
 	 * @returns A `ResultAsync` wrapping the unmodified original result.
 	 */
-	readonly asyncInspectErr: (f: (error: E) => Promise<void>) => ResultAsync<T, E>;
+	readonly asynctapErr: (f: (error: E) => Promise<void>) => ResultAsync<T, E>;
 
 	/**
 	 * Executes a side-effect that does not modify the result.
@@ -1034,10 +1034,10 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	 *
 	 * @example
 	 * ```ts
-	 * const user = await fetchUser().inspect(async u => await logToDb(u.id));
+	 * const user = await fetchUser().tap(async u => await logToDb(u.id));
 	 * ```
 	 */
-	inspect(f: (value: T) => void | Promise<void>): ResultAsync<T, E> {
+	tap(f: (value: T) => void | Promise<void>): ResultAsync<T, E> {
 		return new ResultAsync(
 			this._promise.then(async res => {
 				if (res.isOk()) {
@@ -1057,10 +1057,10 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	 *
 	 * @example
 	 * ```ts
-	 * const user = await fetchUser().inspectErr(async e => await submitErrorToSentry(e));
+	 * const user = await fetchUser().tapErr(async e => await submitErrorToSentry(e));
 	 * ```
 	 */
-	inspectErr(f: (error: E) => void | Promise<void>): ResultAsync<T, E> {
+	tapErr(f: (error: E) => void | Promise<void>): ResultAsync<T, E> {
 		return new ResultAsync(
 			this._promise.then(async res => {
 				if (res.isErr()) {
@@ -1393,15 +1393,15 @@ const ResultMethodsProto = {
 	): Promise<U | F> {
 		return this.isSome() ? Promise.resolve(fns.Some(this.value)) : Promise.resolve(fns.None());
 	},
-	inspect<T, E>(this: Result<T, E>, f: (value: T) => void): Result<T, E> {
+	tap<T, E>(this: Result<T, E>, f: (value: T) => void): Result<T, E> {
 		if (this.ok) f(this.value);
 		return this;
 	},
-	inspectErr<T, E>(this: Result<T, E>, f: (error: E) => void): Result<T, E> {
+	tapErr<T, E>(this: Result<T, E>, f: (error: E) => void): Result<T, E> {
 		if (!this.ok) f((this as unknown as Err<E>).error);
 		return this;
 	},
-	asyncInspect<T, E>(this: Result<T, E>, f: (value: T) => Promise<void>): ResultAsync<T, E> {
+	asynctap<T, E>(this: Result<T, E>, f: (value: T) => Promise<void>): ResultAsync<T, E> {
 		return new ResultAsync(
 			Promise.resolve(this).then(async res => {
 				if (res.isOk()) {
@@ -1411,7 +1411,7 @@ const ResultMethodsProto = {
 			})
 		);
 	},
-	asyncInspectErr<T, E>(this: Result<T, E>, f: (error: E) => Promise<void>): ResultAsync<T, E> {
+	asynctapErr<T, E>(this: Result<T, E>, f: (error: E) => Promise<void>): ResultAsync<T, E> {
 		return new ResultAsync(
 			Promise.resolve(this).then(async res => {
 				if (res.isErr()) {
