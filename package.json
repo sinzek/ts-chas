@@ -55,7 +55,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "docs": "typedoc --out docs",
-    "docs:deploy": "pnpm docs && gh-pages -d docs"
+    "docs:deploy": "pnpm run docs && gh-pages -d docs"
   },
   "keywords": [],
   "author": "",
