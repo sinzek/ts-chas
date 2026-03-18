@@ -4,23 +4,23 @@ import { is, defineSchemas } from '../src/guard.js';
 describe('Guard API Improvements', () => {
 	const schemas = defineSchemas({
 		User: {
-			name: is.string,
-			age: is.number.gt(18),
+			name: is.string.setErrMsg('name is not a string'),
+			age: is.number.gt(18).setErrMsg('age is not greater than 18'),
+			genus: is.string,
 		},
 	});
 
 	it('provides property paths in parse errors', () => {
-		const result = schemas.User.parse({ name: 123, age: 10 });
+		const result = schemas.User.parse({ name: 123, age: 10, genus: 123 });
 		expect(result.isErr()).toBe(true);
-		const errors = result.unwrapErr();
-		expect(errors).toContain('User.name failed validation: expected condition but got 123');
-		expect(errors).toContain('User.age failed validation: expected condition but got 10');
+		const errors = result.unwrapErr().map(e => e.msg);
+		expect(errors).toContain('name is not a string');
+		expect(errors).toContain('age is not greater than 18');
+		expect(errors).toContain('User.genus failed validation: expected string, but got number (123)');
 	});
 
 	it('provides property paths in assert errors', () => {
-		expect(() => schemas.User.assert({ name: 'John', age: 10 })).toThrow(
-			'User.age failed validation: expected condition but got 10'
-		);
+		expect(() => schemas.User.assert({ name: 'John', age: 10 })).toThrow('age is not greater than 18');
 	});
 
 	it('optimizes performance (basic check)', () => {
@@ -30,7 +30,7 @@ describe('Guard API Improvements', () => {
 		}
 		const end = Date.now();
 		console.log(`Parsed 10,000 times in ${end - start}ms`);
-		expect(end - start).toBeLessThan(100); // Very loose check
+		expect(end - start).toBeLessThan(100); // very loose check lol
 	});
 
 	it('supports namespace extensibility via is.extend', () => {
@@ -41,8 +41,50 @@ describe('Guard API Improvements', () => {
 		expect(myIs.app.positiveEven(4)).toBe(true);
 		expect(myIs.app.positiveEven(3)).toBe(false);
 		expect(myIs.app.positiveEven(-2)).toBe(false);
-
-		// Core guards still work
 		expect(myIs.string('hello')).toBe(true);
+	});
+
+	it('supports strict mode for objects', () => {
+		const strictTest = is.object({
+			name: is.string,
+			age: is.number,
+		}).strict;
+
+		expect(strictTest({ name: 'John', age: 25 })).toBe(true);
+		expect(strictTest({ name: 'John', age: 25, extra: true })).toBe(false);
+	});
+
+	it('supports deep equality for objects', () => {
+		const eqTest = is.object.eq({
+			meta: {
+				tags: ['a', 'b'],
+			},
+		});
+
+		expect(eqTest({ meta: { tags: ['a', 'b'] } })).toBe(true);
+		expect(eqTest({ meta: { tags: ['a', 'c'] } })).toBe(false);
+		expect(eqTest({ meta: { tags: ['a'] } })).toBe(false);
+	});
+
+	it('supports enhanced date helpers', () => {
+		const date = new Date('2024-03-20T10:30:00Z'); // Wednesday
+		expect(is.date.day('wednesday')(date)).toBe(true);
+		expect(is.date.day('monday')(date)).toBe(false);
+		expect(is.date.year(2024)(date)).toBe(true);
+		expect(is.date.month(2)(date)).toBe(true); // 0-indexed
+		expect(is.date.dayOfMonth(20)(date)).toBe(true);
+		expect(is.date.hour(date.getHours())(date)).toBe(true);
+	});
+
+	it('supports array equality', () => {
+		expect(is.array.eq([1, 2, 3])([1, 2, 3])).toBe(true);
+		expect(is.array.eq([1, 2, 3])([1, 2, 4])).toBe(false);
+		expect(is.array.eq([1, 2, 3])([1, 2])).toBe(false);
+	});
+
+	it('supports array size checks', () => {
+		expect(is.array.size(3)([1, 2, 3])).toBe(true);
+		expect(is.array.size(3)([1, 2, 4])).toBe(true);
+		expect(is.array.size(3)([1, 2])).toBe(false);
 	});
 });

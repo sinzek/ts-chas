@@ -96,6 +96,21 @@ export type InferErrs<T extends ErrorFactories<any, any>> = {
 }[keyof T & string];
 
 /**
+ * Extracts a single error variant from an `ErrorFactories` object by its tag.
+ *
+ * @example
+ * ```ts
+ * const AppError = chas.defineErrs({ NotFound: () => ({}) });
+ * type NotFound = chas.InferErr<typeof AppError, "NotFound">;
+ * ```
+ */
+export type InferErr<T extends ErrorFactories<any, any>, Tag extends keyof T & string> = T[Tag] extends (
+	...args: any[]
+) => infer R
+	? R
+	: never;
+
+/**
  * Extracts a specific error variant from a TaggedErr union.
  * @example
  * type NotFound = chas.ExtractErr<AppErr, 'NotFound'>;
@@ -152,9 +167,13 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 			const message =
 				typeof data['message'] === 'string'
 					? data['message']
-					: typeof baseProps?.['message'] === 'string'
-						? baseProps['message']
-						: `[${tag}]`;
+					: typeof data['msg'] === 'string'
+						? (data['msg'] as string)
+						: typeof baseProps?.['message'] === 'string'
+							? (baseProps['message'] as string)
+							: typeof baseProps?.['msg'] === 'string'
+								? (baseProps['msg'] as string)
+								: `[${tag}]`;
 
 			const cause =
 				data['cause'] instanceof Error

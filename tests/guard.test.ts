@@ -325,13 +325,13 @@ describe('Guard Module', () => {
 		it('parse failure', () => {
 			const res = schemas.User.parse({ name: 'John', age: '30' });
 			expect(res.isErr()).toBe(true);
-			expect(res.unwrapErr()[0]).toContain('User.age failed validation');
+			expect(res.unwrapErr()[0].msg).toContain('User.age failed validation');
 		});
 
 		it('parse non-object', () => {
 			const res = schemas.User.parse(null);
 			expect(res.isErr()).toBe(true);
-			expect(res.unwrapErr()[0]).toContain('Expected an object');
+			expect(res.unwrapErr()[0].msg).toContain('Expected an object');
 		});
 
 		it('assert success', () => {

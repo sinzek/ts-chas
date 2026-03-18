@@ -1,8 +1,16 @@
-import type { TaggedErr } from './tagged-errs.js';
+import { type TaggedErr, defineErrs, type InferErr } from './tagged-errs.js';
 import type { None, Option, Some } from './option.js';
 import { err, ok, ResultAsync, type Err, type Ok, type Result } from './result.js';
 import { Task } from './task.js';
-import { type UnionToIntersection } from './utils.js';
+import { type UnionToIntersection, deepEqual } from './utils.js';
+
+const GuardErrs = defineErrs({
+	GuardErr: (props: { msg: string; path: string[]; expected: string; schema?: string }) => props,
+});
+/**
+ * The error type that is used by default when parsing a guard.
+ */
+export type GuardErr = InferErr<typeof GuardErrs, 'GuardErr'>;
 
 /**
  * A guard is a function that returns true if the value is of the specified type (or satisfies a set of conditions) and narrows the type of the value.
@@ -19,13 +27,24 @@ import { type UnionToIntersection } from './utils.js';
  *
  * // Using a guard to validate a form field
  * const email = document.getElementById('email') as HTMLInputElement;
- * if (is.email(email.value)) {
- *   // email.value is now typed as string
+ * if (is.string.email.length(4, 100)(email.value)) {
+ *   // email.value is an email string between 4 and 100 characters long
  * }
  *
  * // Using a guard to validate a value and return a Result
- * const result = validate(value, is.string, new Error('Value must be a string'));
- * // result is now typed as Result<string, Error>
+ * const result = validate(value, is.string);
+ * // result is typed as Result<string, GuardErr>
+ *
+ * // Using guards to define a schema
+ * const schemas = defineSchemas({
+ *   User: {
+ *     name: is.string,
+ *     age: is.number,
+ *     email: is.string.email,
+ *   },
+ * });
+ * const result = schemas.User.parse(foo);
+ * // result is typed as Result<{ name: string; age: number; email: string }, GuardErr[]>
  * ```
  */
 export type Guard<T> = ((value: unknown) => value is T) & {
@@ -34,20 +53,30 @@ export type Guard<T> = ((value: unknown) => value is T) & {
 	 */
 	readonly meta?: {
 		errorMsg?: string;
+		name: string;
+		[key: string]: any;
 	};
 };
 
 /**
  * Extracts the type from a guard.
- * @internal
  */
-type GuardType<T> = T extends Guard<infer U> ? U : never;
+export type GuardType<T> = T extends Guard<infer U> ? U : never;
 
-/**
- * Specialized helpers and factory types for core guards.
- * @internal
- */
-type StringHelpers = {
+type CommonHelpers<T> = {
+	/**
+	 * Sets a custom error message for the guard.
+	 * @param errorMsg The error message to set.
+	 */
+	readonly setErrMsg: (errorMsg: string) => T;
+	/**
+	 * Sets custom metadata for the guard.
+	 * @param meta The metadata to set.
+	 */
+	readonly setMeta: (meta: Guard<any>['meta']) => T;
+};
+
+interface StringHelpers extends CommonHelpers<ChainableStringGuard> {
 	/**
 	 * Checks if the string is not empty.
 	 */
@@ -150,25 +179,25 @@ type StringHelpers = {
 	readonly includesOnly: (substrings: string[]) => ChainableStringGuard;
 
 	/**
-	 * Checks if the string includes spaces.
+	 * Checks if the string includes spaces. If no arguments are provided, it will check for at least one space.
 	 * @param minSpaces The minimum number of spaces.
 	 * @param maxSpaces The maximum number of spaces.
 	 */
 	readonly spaces: (minSpaces?: number, maxSpaces?: number) => ChainableStringGuard;
 	/**
-	 * Checks if the string includes symbols.
+	 * Checks if the string includes symbols. If no arguments are provided, it will check for at least one symbol.
 	 * @param minSymbols The minimum number of symbols.
 	 * @param maxSymbols The maximum number of symbols.
 	 */
 	readonly symbols: (minSymbols?: number, maxSymbols?: number) => ChainableStringGuard;
 	/**
-	 * Checks if the string includes numbers.
+	 * Checks if the string includes numbers. If no arguments are provided, it will check for at least one number.
 	 * @param minNumbers The minimum number of numbers.
 	 * @param maxNumbers The maximum number of numbers.
 	 */
 	readonly numbers: (minNumbers?: number, maxNumbers?: number) => ChainableStringGuard;
 	/**
-	 * Checks if the string includes letters.
+	 * Checks if the string includes letters. If no arguments are provided, it will check for at least one letter.
 	 * @param type The type of letters to check for.
 	 * @param minLetters The minimum number of letters.
 	 * @param maxLetters The maximum number of letters.
@@ -178,9 +207,9 @@ type StringHelpers = {
 		minLetters?: number,
 		maxLetters?: number
 	) => ChainableStringGuard;
-};
+}
 
-type NumberHelpers = {
+interface NumberHelpers extends CommonHelpers<ChainableNumberGuard> {
 	/**
 	 * Checks if the number is greater than the specified value.
 	 * @param n The value to compare against.
@@ -236,9 +265,9 @@ type NumberHelpers = {
 	 * @param predicate The predicate to check against.
 	 */
 	readonly where: (predicate: (value: number) => boolean) => ChainableNumberGuard;
-};
+}
 
-type ArrayHelpers<T> = {
+interface ArrayHelpers<T> extends CommonHelpers<ChainableArrayGuard<T>> {
 	/**
 	 * Checks if the array has a minimum length.
 	 * @param n The minimum length.
@@ -295,19 +324,20 @@ type ArrayHelpers<T> = {
 	 * Checks if the array includes only the specified items.
 	 * @param items The items to check for.
 	 */
-	/**
-	 * Checks if the array includes only the specified items.
-	 * @param items The items to check for.
-	 */
 	readonly includesOnly: (items: any[]) => ChainableArrayGuard<T>;
 	/**
 	 * Adds a custom predicate to the array guard.
 	 * @param predicate The predicate to check against.
 	 */
 	readonly where: (predicate: (value: T[]) => boolean) => ChainableArrayGuard<T>;
-};
+	/**
+	 * Checks if the array is equal to the specified value (deep comparison).
+	 * @param value The value to check against.
+	 */
+	readonly eq: (value: T[]) => ChainableArrayGuard<T>;
+}
 
-type ObjectHelpers<T extends Record<string, any>> = {
+interface ObjectHelpers<T extends Record<string, any>> extends CommonHelpers<ChainableObjectGuard<T>> {
 	/**
 	 * Checks if the object has the specified property.
 	 * @param key The property to check for.
@@ -339,13 +369,22 @@ type ObjectHelpers<T extends Record<string, any>> = {
 	 */
 	readonly hasOnly: (keys: (keyof T)[]) => ChainableObjectGuard<T>;
 	/**
+	 * Checks if the object is equal to the specified value (deep comparison).
+	 * @param value The value to check against.
+	 */
+	readonly eq: (value: T) => ChainableObjectGuard<T>;
+	/**
 	 * Adds a custom predicate to the object guard.
 	 * @param predicate The predicate to check against.
 	 */
 	readonly where: (predicate: (value: T) => boolean) => ChainableObjectGuard<T>;
-};
+	/**
+	 * Checks if the object has only the specified properties (no extra properties allowed)
+	 */
+	readonly strict: ChainableObjectGuard<T>;
+}
 
-type DateHelpers = {
+interface DateHelpers extends CommonHelpers<ChainableDateGuard> {
 	/**
 	 * Checks if the date is before the specified date.
 	 * @param date The date to compare against.
@@ -371,13 +410,65 @@ type DateHelpers = {
 	 */
 	readonly weekday: ChainableDateGuard;
 	/**
+	 * Checks if the date is a specific day of the week.
+	 * @param day The day of the week to check for.
+	 */
+	readonly day: (
+		day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
+	) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific year.
+	 * @param year The year to check for.
+	 */
+	readonly year: (year: number) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific month (0-indexed: January is 0, December is 11).
+	 * @param month The month to check for.
+	 */
+	readonly month: (month: number) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific day of the month.
+	 * @param day The day of the month to check for.
+	 */
+	readonly dayOfMonth: (day: number) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific time.
+	 * @param time The time to check for.
+	 */
+	readonly time: (time: { hour: number; minute: number; second: number }) => ChainableDateGuard;
+	/**
+	 * Checks if the date has a specific timezone offset.
+	 * @param timezoneOffset The timezone offset to check for.
+	 */
+	readonly timezoneOffset: (timezoneOffset: number) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific hour.
+	 * @param hour The hour to check for.
+	 */
+	readonly hour: (hour: number) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific minute.
+	 * @param minute The minute to check for.
+	 */
+	readonly minute: (minute: number) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific second.
+	 * @param second The second to check for.
+	 */
+	readonly second: (second: number) => ChainableDateGuard;
+	/**
+	 * Checks if the date is a specific millisecond.
+	 * @param millisecond The millisecond to check for.
+	 */
+	readonly millisecond: (millisecond: number) => ChainableDateGuard;
+	/**
 	 * Adds a custom predicate to the date guard.
 	 * @param predicate The predicate to check against.
 	 */
 	readonly where: (predicate: (value: Date) => boolean) => ChainableDateGuard;
-};
+}
 
-type BooleanHelpers = {
+interface BooleanHelpers extends CommonHelpers<ChainableBooleanGuard> {
 	/**
 	 * Checks if the value is strictly true.
 	 */
@@ -391,7 +482,7 @@ type BooleanHelpers = {
 	 * @param predicate The predicate to check against.
 	 */
 	readonly where: (predicate: (value: boolean) => boolean) => ChainableBooleanGuard;
-};
+}
 
 type ChainableStringGuard = Guard<string> & StringHelpers;
 type ChainableNumberGuard = Guard<number> & NumberHelpers;
@@ -458,6 +549,17 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 		hasOnly: true,
 		before: true,
 		after: true,
+		day: true,
+		year: true,
+		month: true,
+		dayOfMonth: true,
+		time: true,
+		timezoneOffset: true,
+		hour: true,
+		minute: true,
+		second: true,
+		millisecond: true,
+		eq: true,
 	};
 
 	const createProxy = (target: any, currentHelpers: Record<string, any>): any => {
@@ -470,16 +572,50 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 				return result;
 			},
 			get(target, prop: string) {
+				if (prop === 'setErrMsg') {
+					return (errorMsg: string) => {
+						const nextGuard = ((v: unknown): v is any => target(v)) as any;
+						nextGuard.meta = { ...target.meta, errorMsg };
+						return createProxy(nextGuard, currentHelpers);
+					};
+				}
+
+				if (prop === 'setMeta') {
+					return (meta: Record<string, any>) => {
+						const nextGuard = ((v: unknown): v is any => target(v)) as any;
+						nextGuard.meta = { ...target.meta, ...meta };
+						return createProxy(nextGuard, currentHelpers);
+					};
+				}
+
+				if (prop === 'strict' && target.meta?.shape) {
+					const shape = target.meta.shape;
+					const name = `${target.meta.name || 'unknown'}.strict`;
+					const nextGuard = setTypeName(
+						((v: unknown): v is any => {
+							if (!target(v)) return false;
+							if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+							return Object.keys(v).every(key => key in shape);
+						}) as any,
+						name
+					);
+					return createProxy(nextGuard, currentHelpers);
+				}
+
 				if (prop in currentHelpers) {
 					const helper = currentHelpers[prop];
 
-					// Specialized override: spaces on alphanumeric should allow spaces in the base check
+					// spaces on alphanumeric should allow spaces in the base check
 					if (prop === 'spaces' && (target as any)._isAlphanumeric) {
 						return (...args: any[]) => {
 							const nextGuard = helper(...args);
+							const name = `${target.meta?.name || 'unknown'}.${prop}${args.length ? `(${args.join(', ')})` : ''}`;
 							return createProxy(
-								((v: unknown) =>
-									typeof v === 'string' && /^[a-z0-9\s]*$/i.test(v) && nextGuard(v)) as any,
+								setTypeName(
+									((v: unknown): v is any =>
+										typeof v === 'string' && /^[a-z0-9\s]*$/i.test(v) && nextGuard(v)) as any,
+									name
+								),
 								currentHelpers
 							);
 						};
@@ -487,16 +623,21 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 
 					if (prop in factoryHelpers) {
 						return (...args: any[]) => {
-							const nextGuard = helper(...args);
+							const nextGuard = helper.apply(target, args);
+							const name = `${target.meta?.name || 'unknown'}.${prop}${args.length ? `(${args.join(', ')})` : ''}`;
 							return createProxy(
-								((v: unknown) => target(v) && nextGuard(v)) as Guard<any>,
+								setTypeName(((v: unknown): v is any => target(v) && nextGuard(v)) as any, name),
 								currentHelpers
 							);
 						};
 					}
 
 					const nextHelpers = { ...currentHelpers, ...helper };
-					const nextGuard = ((v: unknown) => target(v) && (helper as Guard<any>)(v)) as any;
+					const name = `${target.meta?.name || 'unknown'}.${prop}`;
+					const nextGuard = setTypeName(
+						((v: unknown): v is any => target(v) && (helper as Guard<any>)(v)) as any,
+						name
+					);
 					if (prop === 'alphanumeric') nextGuard._isAlphanumeric = true;
 					return createProxy(nextGuard, nextHelpers);
 				}
@@ -509,6 +650,12 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 
 	return createProxy(base, helpers);
 }
+
+const setTypeName = <T extends Guard<any>>(guard: T, name: string, etc?: Record<string, any>): T => {
+	const nextGuard = ((v: unknown): v is any => guard(v)) as any;
+	nextGuard.meta = { ...guard.meta, name, ...etc };
+	return nextGuard;
+};
 
 const RGX = {
 	email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
@@ -582,7 +729,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	string: makeChainable(((v: unknown) => typeof v === 'string') as Guard<string>, {
+	string: makeChainable(setTypeName(((v: unknown) => typeof v === 'string') as Guard<string>, 'string'), {
 		nonEmpty: ((v: unknown) => typeof v === 'string' && v.trim().length > 0) as Guard<string>,
 		empty: ((v: unknown) => typeof v === 'string' && v.trim().length === 0) as Guard<string>,
 		email: ((v: unknown) => typeof v === 'string' && RGX.email.test(v)) as Guard<string>,
@@ -667,32 +814,35 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	number: makeChainable(((v: unknown) => typeof v === 'number' && Number.isFinite(v)) as Guard<number>, {
-		/** Checks if a value is a number and is greater than a given number. */
-		gt: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v > n) as Guard<number>,
-		/** Checks if a value is a number and is greater than or equal to a given number. */
-		gte: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v >= n) as Guard<number>,
-		/** Checks if a value is a number and is less than a given number. */
-		lt: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v < n) as Guard<number>,
-		/** Checks if a value is a number and is less than or equal to a given number. */
-		lte: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v <= n) as Guard<number>,
-		/** Checks if a value is a number and is between two given numbers. */
-		between: (min: number, max: number): Guard<number> =>
-			((v: unknown) => typeof v === 'number' && v >= min && v <= max) as Guard<number>,
-		/** Checks if a value is a positive number. */
-		positive: ((v: unknown) => typeof v === 'number' && v > 0) as Guard<number>,
-		/** Checks if a value is a negative number. */
-		negative: ((v: unknown) => typeof v === 'number' && v < 0) as Guard<number>,
-		/** Checks if a value is an even number. */
-		even: ((v: unknown) => typeof v === 'number' && v % 2 === 0) as Guard<number>,
-		/** Checks if a value is an odd number. */
-		odd: ((v: unknown) => typeof v === 'number' && v % 2 !== 0) as Guard<number>,
-		/** Checks if a value is an integer. */
-		integer: ((v: unknown) => typeof v === 'number' && Number.isInteger(v)) as Guard<number>,
-		/** Checks if a value is a float. */
-		float: ((v: unknown) => typeof v === 'number' && !Number.isInteger(v) && !Number.isNaN(v)) as Guard<number>,
-		where: (predicate: (v: number) => boolean) => ((v: any) => predicate(v)) as Guard<number>,
-	}) as ChainableNumberGuard,
+	number: makeChainable(
+		setTypeName(((v: unknown) => typeof v === 'number' && Number.isFinite(v)) as Guard<number>, 'number'),
+		{
+			/** Checks if a value is a number and is greater than a given number. */
+			gt: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v > n) as Guard<number>,
+			/** Checks if a value is a number and is greater than or equal to a given number. */
+			gte: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v >= n) as Guard<number>,
+			/** Checks if a value is a number and is less than a given number. */
+			lt: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v < n) as Guard<number>,
+			/** Checks if a value is a number and is less than or equal to a given number. */
+			lte: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v <= n) as Guard<number>,
+			/** Checks if a value is a number and is between two given numbers. */
+			between: (min: number, max: number): Guard<number> =>
+				((v: unknown) => typeof v === 'number' && v >= min && v <= max) as Guard<number>,
+			/** Checks if a value is a positive number. */
+			positive: ((v: unknown) => typeof v === 'number' && v > 0) as Guard<number>,
+			/** Checks if a value is a negative number. */
+			negative: ((v: unknown) => typeof v === 'number' && v < 0) as Guard<number>,
+			/** Checks if a value is an even number. */
+			even: ((v: unknown) => typeof v === 'number' && v % 2 === 0) as Guard<number>,
+			/** Checks if a value is an odd number. */
+			odd: ((v: unknown) => typeof v === 'number' && v % 2 !== 0) as Guard<number>,
+			/** Checks if a value is an integer. */
+			integer: ((v: unknown) => typeof v === 'number' && Number.isInteger(v)) as Guard<number>,
+			/** Checks if a value is a float. */
+			float: ((v: unknown) => typeof v === 'number' && !Number.isInteger(v) && !Number.isNaN(v)) as Guard<number>,
+			where: (predicate: (v: number) => boolean) => ((v: any) => predicate(v)) as Guard<number>,
+		}
+	) as ChainableNumberGuard,
 	/**
 	 * Checks if a value is a boolean.
 	 * @param value The value to check.
@@ -709,10 +859,11 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	boolean: makeChainable((v => typeof v === 'boolean') as Guard<boolean>, {
+	boolean: makeChainable(setTypeName(((v: unknown) => typeof v === 'boolean') as Guard<boolean>, 'boolean'), {
 		true: ((v: unknown) => v === true) as Guard<boolean>,
 		false: ((v: unknown) => v === false) as Guard<boolean>,
-		where: (predicate: (v: boolean) => boolean) => ((v: unknown) => typeof v === 'boolean' && predicate(v)) as Guard<boolean>,
+		where: (predicate: (v: boolean) => boolean) =>
+			((v: unknown) => typeof v === 'boolean' && predicate(v)) as Guard<boolean>,
 	}) as ChainableBooleanGuard,
 	/**
 	 * Checks if a value is a symbol.
@@ -730,7 +881,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	symbol: (v => typeof v === 'symbol') as Guard<symbol>,
+	symbol: setTypeName((v => typeof v === 'symbol') as Guard<symbol>, 'symbol'),
 	/**
 	 * Checks if a value is a bigint.
 	 * @param value The value to check.
@@ -747,7 +898,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	bigint: (v => typeof v === 'bigint') as Guard<bigint>,
+	bigint: setTypeName((v => typeof v === 'bigint') as Guard<bigint>, 'bigint'),
 	/**
 	 * Checks if a value is undefined.
 	 * @param value The value to check.
@@ -764,7 +915,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	undefined: (v => v === undefined) as Guard<undefined>,
+	undefined: setTypeName((v => v === undefined) as Guard<undefined>, 'undefined'),
 	/**
 	 * Checks if a value is null.
 	 * @param value The value to check.
@@ -781,7 +932,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	null: (v => v === null) as Guard<null>,
+	null: setTypeName((v => v === null) as Guard<null>, 'null'),
 	/**
 	 * Checks if a value is null or undefined.
 	 * @param value The value to check.
@@ -798,7 +949,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	nil: (v => v == null) as Guard<null | undefined>,
+	nil: setTypeName((v => v == null) as Guard<null | undefined>, 'nil'),
 	/**
 	 * Checks if a value is null or passes the inner guard.
 	 * @param inner The guard to check.
@@ -815,7 +966,8 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	nullable: <T>(inner: Guard<T>) => (v => v === null || inner(v)) as Guard<T | null>,
+	nullable: <T>(inner: Guard<T>) =>
+		setTypeName((v => v === null || inner(v)) as Guard<T | null>, `nullable<${inner.meta?.name || 'unknown'}>`),
 	/**
 	 * Checks if a value is undefined or passes the inner guard.
 	 * @param inner The guard to check.
@@ -832,7 +984,11 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	optional: <T>(inner: Guard<T>) => (v => v === undefined || inner(v)) as Guard<T | undefined>,
+	optional: <T>(inner: Guard<T>) =>
+		setTypeName(
+			(v => v === undefined || inner(v)) as Guard<T | undefined>,
+			`optional<${inner.meta?.name || 'unknown'}>`
+		),
 	/**
 	 * Checks if a value is a function.
 	 * @param value The value to check.
@@ -849,7 +1005,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	function: (v => typeof v === 'function') as Guard<Function>,
+	function: setTypeName((v => typeof v === 'function') as Guard<Function>, 'function'),
 
 	/**
 	 * Checks if a value is an array.
@@ -878,9 +1034,11 @@ const implementation = {
 	 * ```
 	 */
 	array: makeChainable(
-		(<T>(inner?: Guard<T>) => (v => Array.isArray(v) && (!inner || v.every(inner))) as Guard<T[]>) as <T>(
-			inner?: Guard<T>
-		) => ChainableArrayGuard<T>,
+		(<T>(inner?: Guard<T>) =>
+			setTypeName(
+				(v => Array.isArray(v) && (!inner || v.every(inner))) as Guard<T[]>,
+				`array<${inner?.meta?.name || 'any'}>`
+			)) as <T>(inner?: Guard<T>) => ChainableArrayGuard<T>,
 		{
 			/** Checks if value is an array and has a minimum length. */
 			min: (n: number) => ((v: any[]) => Array.isArray(v) && v.length >= n) as Guard<any[]>,
@@ -918,6 +1076,7 @@ const implementation = {
 					for (const i of arrSet) if (!itemSet.has(i)) return false;
 					return true;
 				}) as Guard<any[]>,
+			eq: (value: any[]) => ((arr: any[]) => deepEqual(arr, value)) as Guard<any[]>,
 			where: (predicate: (v: any[]) => boolean) => ((v: any) => predicate(v)) as Guard<any[]>,
 		}
 	) as ArrayFactory,
@@ -949,11 +1108,17 @@ const implementation = {
 	 */
 	object: makeChainable(
 		<T extends Record<string, any>>(shape?: { [K in keyof T]: Guard<T[K]> }) =>
-			(v => {
-				if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-				if (!shape) return true;
-				return Object.entries(shape).every(([k, g]) => (g as any)((v as any)[k]));
-			}) as ChainableObjectGuard<T>,
+			setTypeName(
+				(v => {
+					if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+					if (!shape) return true;
+					return Object.entries(shape).every(([k, g]) => (g as any)((v as any)[k]));
+				}) as Guard<T>,
+				`object<${shape ? Object.keys(shape).join(', ') : 'any'}>`,
+				{
+					shape,
+				}
+			) as ChainableObjectGuard<T>,
 		{
 			has: <T = any>(key: keyof T) => ((v: any) => key in v) as Guard<T>,
 			notHas: <T = any>(key: keyof T) => ((v: any) => !(key in v)) as Guard<T>,
@@ -964,6 +1129,7 @@ const implementation = {
 				((v: any) =>
 					keys.every(key => key in v) &&
 					Object.keys(v).every(key => keys.includes(key as keyof T))) as Guard<T>,
+			eq: <T = any>(value: T) => ((v: any) => deepEqual(v, value)) as Guard<T>,
 		}
 	) as ObjectFactory,
 	/**
@@ -993,10 +1159,15 @@ const implementation = {
 	 * ```
 	 */
 	partial: <T extends object>(shape: { [K in keyof T]: Guard<T[K]> }): Guard<Partial<T>> =>
-		(v => {
-			if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-			return Object.entries(shape).every(([k, g]) => (v as any)[k] === undefined || (g as any)((v as any)[k]));
-		}) as Guard<Partial<T>>,
+		setTypeName(
+			(v => {
+				if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+				return Object.entries(shape).every(
+					([k, g]) => (v as any)[k] === undefined || (g as any)((v as any)[k])
+				);
+			}) as Guard<Partial<T>>,
+			`partial<${Object.keys(shape).join(', ')}>`
+		),
 	/**
 	 * Checks if a value is a record.
 	 * @param value The value to check.
@@ -1013,10 +1184,13 @@ const implementation = {
 	 * ```
 	 */
 	record: <K extends string | number | symbol, V>(keyGuard: Guard<K>, valGuard: Guard<V>): Guard<Record<K, V>> =>
-		(v => {
-			if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-			return Object.entries(v).every(([k, val]) => keyGuard(k) && valGuard(val));
-		}) as Guard<Record<K, V>>,
+		setTypeName(
+			(v => {
+				if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+				return Object.entries(v).every(([k, val]) => keyGuard(k) && valGuard(val));
+			}) as Guard<Record<K, V>>,
+			`record<${keyGuard.meta?.name || 'unknown'}, ${valGuard.meta?.name || 'unknown'}>`
+		),
 	/**
 	 * Checks if a value is a tuple.
 	 * @param value The value to check.
@@ -1033,10 +1207,13 @@ const implementation = {
 	 * ```
 	 */
 	tuple: <T extends any[]>(...guards: { [K in keyof T]: Guard<T[K]> }): Guard<T> =>
-		(v => {
-			if (!Array.isArray(v) || v.length !== guards.length) return false;
-			return v.every((val, idx) => (guards[idx] as any)(val));
-		}) as Guard<T>,
+		setTypeName(
+			(v => {
+				if (!Array.isArray(v) || v.length !== guards.length) return false;
+				return v.every((val, idx) => (guards[idx] as any)(val));
+			}) as Guard<T>,
+			`tuple<${guards.map(g => g.meta?.name || 'unknown').join(', ')}>`
+		),
 	/**
 	 * Checks if a value satisfies one or more of the specified guards.
 	 * @param value The value to check.
@@ -1053,7 +1230,10 @@ const implementation = {
 	 * ```
 	 */
 	anyOf: <T extends Guard<any>[]>(...guards: T): Guard<GuardType<T[number]>> =>
-		((v: unknown) => guards.some(g => g(v))) as any,
+		setTypeName(
+			(v: unknown): v is GuardType<T[number]> => guards.some(g => g(v)),
+			`anyOf<${guards.map(g => g.meta?.name || 'unknown').join(', ')}>`
+		) as any,
 	/**
 	 * Checks if a value satisfies all of the specified guards.
 	 * @param value The value to check.
@@ -1073,7 +1253,10 @@ const implementation = {
 	 * ```
 	 */
 	allOf: <T extends Guard<any>[]>(...guards: T): Guard<UnionToIntersection<GuardType<T[number]>>> =>
-		((v: unknown) => guards.every(g => g(v))) as any,
+		setTypeName(
+			(v: unknown): v is UnionToIntersection<GuardType<T[number]>> => guards.every(g => g(v)),
+			`allOf<${guards.map(g => g.meta?.name || 'unknown').join(', ')}>`
+		) as any,
 	/**
 	 * Checks if a value is a date.
 	 * @param value The value to check.
@@ -1089,14 +1272,47 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	date: makeChainable((v: unknown): v is Date => v instanceof Date && !isNaN(v.getTime()), {
-		before: (date: Date) => ((v: unknown) => v instanceof Date && v < date) as Guard<Date>,
-		after: (date: Date) => ((v: unknown) => v instanceof Date && v > date) as Guard<Date>,
-		between: (min: Date, max: Date) => ((v: unknown) => v instanceof Date && v >= min && v <= max) as Guard<Date>,
-		weekend: ((v: unknown) => v instanceof Date && (v.getDay() === 0 || v.getDay() === 6)) as Guard<Date>,
-		weekday: ((v: unknown) => v instanceof Date && v.getDay() !== 0 && v.getDay() !== 6) as Guard<Date>,
-		where: (predicate: (v: Date) => boolean) => ((v: unknown) => v instanceof Date && predicate(v)) as Guard<Date>,
-	}) as ChainableDateGuard,
+	date: makeChainable(
+		setTypeName((v: unknown): v is Date => v instanceof Date && !isNaN(v.getTime()), 'date'),
+		{
+			before: (date: Date) => ((v: unknown) => v instanceof Date && v < date) as Guard<Date>,
+			after: (date: Date) => ((v: unknown) => v instanceof Date && v > date) as Guard<Date>,
+			between: (min: Date, max: Date) =>
+				((v: unknown) => v instanceof Date && v >= min && v <= max) as Guard<Date>,
+			weekend: ((v: unknown) => v instanceof Date && (v.getDay() === 0 || v.getDay() === 6)) as Guard<Date>,
+			weekday: ((v: unknown) => v instanceof Date && v.getDay() !== 0 && v.getDay() !== 6) as Guard<Date>,
+			day: (day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday') => {
+				const days = {
+					sunday: 0,
+					monday: 1,
+					tuesday: 2,
+					wednesday: 3,
+					thursday: 4,
+					friday: 5,
+					saturday: 6,
+				};
+				return ((v: unknown) => v instanceof Date && v.getDay() === days[day]) as Guard<Date>;
+			},
+			year: (year: number) => ((v: unknown) => v instanceof Date && v.getFullYear() === year) as Guard<Date>,
+			month: (month: number) => ((v: unknown) => v instanceof Date && v.getMonth() === month) as Guard<Date>,
+			dayOfMonth: (day: number) => ((v: unknown) => v instanceof Date && v.getDate() === day) as Guard<Date>,
+			time: (time: { hour: number; minute: number; second: number }) =>
+				((v: unknown) =>
+					v instanceof Date &&
+					v.getHours() === time.hour &&
+					v.getMinutes() === time.minute &&
+					v.getSeconds() === time.second) as Guard<Date>,
+			timezoneOffset: (timezoneOffset: number) =>
+				((v: unknown) => v instanceof Date && v.getTimezoneOffset() === timezoneOffset) as Guard<Date>,
+			hour: (hour: number) => ((v: unknown) => v instanceof Date && v.getHours() === hour) as Guard<Date>,
+			minute: (minute: number) => ((v: unknown) => v instanceof Date && v.getMinutes() === minute) as Guard<Date>,
+			second: (second: number) => ((v: unknown) => v instanceof Date && v.getSeconds() === second) as Guard<Date>,
+			millisecond: (millisecond: number) =>
+				((v: unknown) => v instanceof Date && v.getMilliseconds() === millisecond) as Guard<Date>,
+			where: (predicate: (v: Date) => boolean) =>
+				((v: unknown) => v instanceof Date && predicate(v)) as Guard<Date>,
+		}
+	) as ChainableDateGuard,
 	/**
 	 * Checks if a value is an Ok result.
 	 * @param value The value to check.
@@ -1112,10 +1328,11 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	ok:
-		<T = any>(inner?: Guard<T>): Guard<Ok<T>> =>
-		(v: any): v is Ok<T> =>
-			!!v && v.ok === true && (!inner || inner(v.value)),
+	ok: <T = any>(inner?: Guard<T>): Guard<Ok<T>> =>
+		setTypeName(
+			(v: any): v is Ok<T> => !!v && v.ok === true && (!inner || inner(v.value)),
+			`Ok<${inner?.meta?.name || 'unknown'}>`
+		),
 
 	/**
 	 * Checks if a value is an Err result.
@@ -1132,10 +1349,11 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	err:
-		<E = any>(inner?: Guard<E>): Guard<Err<E>> =>
-		(v: any): v is Err<E> =>
-			!!v && v.ok === false && (!inner || inner(v.error)),
+	err: <E = any>(inner?: Guard<E>): Guard<Err<E>> =>
+		setTypeName(
+			(v: any): v is Err<E> => !!v && v.ok === false && (!inner || inner(v.error)),
+			`Err<${inner?.meta?.name || 'unknown'}>`
+		),
 
 	/**
 	 * Checks if a value is a Result.
@@ -1153,7 +1371,10 @@ const implementation = {
 	 * ```
 	 */
 	result: <T, E>(okG?: Guard<T>, errG?: Guard<E>): Guard<Result<T, E>> =>
-		((v: unknown) => is.ok(okG)(v) || is.err(errG)(v)) as Guard<Result<T, E>>,
+		setTypeName(
+			((v: unknown) => is.ok(okG)(v) || is.err(errG)(v)) as Guard<Result<T, E>>,
+			`Result<${okG?.meta?.name || 'never'}, ${errG?.meta?.name || 'never'}>`
+		),
 
 	/**
 	 * Checks if a value is a Some.
@@ -1170,10 +1391,11 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	some:
-		<T = any>(inner?: Guard<T>): Guard<Some<T>> =>
-		(v: any): v is Some<T> =>
-			is.ok()(v) && v.value != null && (!inner || inner(v.value)),
+	some: <T = any>(inner?: Guard<T>): Guard<Some<T>> =>
+		setTypeName(
+			(v: any): v is Some<T> => is.ok()(v) && v.value != null && (!inner || inner(v.value)),
+			`Some<${inner?.meta?.name || 'unknown'}>`
+		),
 
 	/**
 	 * Checks if a value is a None.
@@ -1190,10 +1412,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	none:
-		(): Guard<None> =>
-		(v: any): v is None =>
-			is.err()(v) && v.error === undefined,
+	none: (): Guard<None> => setTypeName((v: any): v is None => is.err()(v) && v.error === undefined, 'None'),
 
 	/**
 	 * Checks if a value is an Option.
@@ -1211,7 +1430,10 @@ const implementation = {
 	 * ```
 	 */
 	option: <T>(inner?: Guard<T>): Guard<Option<T>> =>
-		((v: unknown) => is.some(inner)(v) || is.none()(v)) as Guard<Option<T>>,
+		setTypeName(
+			((v: unknown) => is.some(inner)(v) || is.none()(v)) as Guard<Option<T>>,
+			`Option<${inner?.meta?.name || 'unknown'}>`
+		),
 
 	/**
 	 * Checks if a value is a tagged error using a tag or error factory.
@@ -1237,13 +1459,16 @@ const implementation = {
 	 * ```
 	 */
 	taggedErr: (tagOrFactory: string | ErrorFactory, inner?: Guard<any>): Guard<any> => {
-		return (v: any): v is any => {
-			if (typeof tagOrFactory !== 'string' && 'is' in tagOrFactory) {
-				return tagOrFactory.is(v) && (!inner || inner(v));
-			}
-			const matchesTag = !!v && typeof v === 'object' && v._tag === tagOrFactory;
-			return matchesTag && (!inner || inner(v));
-		};
+		return setTypeName(
+			(v: any): v is any => {
+				if (typeof tagOrFactory !== 'string' && 'is' in tagOrFactory) {
+					return tagOrFactory.is(v) && (!inner || inner(v));
+				}
+				const matchesTag = !!v && typeof v === 'object' && v._tag === tagOrFactory;
+				return matchesTag && (!inner || inner(v));
+			},
+			`taggedErr (${typeof tagOrFactory === 'string' ? tagOrFactory : 'factory'})`
+		);
 	},
 
 	/**
@@ -1261,10 +1486,8 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	not:
-		<T>(guard: Guard<T>): Guard<any> =>
-		(v: unknown): v is any =>
-			!guard(v),
+	not: <T>(guard: Guard<T>): Guard<any> =>
+		setTypeName((v: unknown): v is any => !guard(v), `not (${guard.meta?.name || 'unknown'})`),
 
 	/**
 	 * Checks if a value matches a schema.
@@ -1297,20 +1520,23 @@ const implementation = {
 	 * ```
 	 */
 	schema: <T>(s: { safeParse?: (v: unknown) => any; parse?: (v: unknown) => any }): Guard<T> =>
-		(v => {
-			if (typeof s.safeParse === 'function') {
-				return !!s.safeParse(v).success;
-			}
-			if (typeof s.parse === 'function') {
-				try {
-					s.parse(v);
-					return true;
-				} catch {
-					return false;
+		setTypeName(
+			(v => {
+				if (typeof s.safeParse === 'function') {
+					return !!s.safeParse(v).success;
 				}
-			}
-			return false;
-		}) as Guard<T>,
+				if (typeof s.parse === 'function') {
+					try {
+						s.parse(v);
+						return true;
+					} catch {
+						return false;
+					}
+				}
+				return false;
+			}) as Guard<T>,
+			`schema (${s.constructor.name || 'unknown'})`
+		),
 
 	/**
 	 * Checks if a value is a specific literal value.
@@ -1327,10 +1553,8 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	literal:
-		<T extends string | number | boolean>(val: T): Guard<T> =>
-		(v: unknown): v is T =>
-			v === val,
+	literal: <T extends string | number | boolean>(val: T): Guard<T> =>
+		setTypeName((v: unknown): v is T => v === val, `literal (${JSON.stringify(val)})`),
 
 	/**
 	 * Checks if a value is a discriminated union.
@@ -1351,12 +1575,15 @@ const implementation = {
 		key: K,
 		mapping: { [V in T[K] & (string | number)]: Guard<Extract<T, { [P in K]: V }>> }
 	): Guard<T> =>
-		(v => {
-			if (typeof v !== 'object' || v === null) return false;
-			const tag = (v as any)[key];
-			const guard = (mapping as any)[tag];
-			return guard ? guard(v) : false;
-		}) as Guard<T>,
+		setTypeName(
+			(v => {
+				if (typeof v !== 'object' || v === null) return false;
+				const tag = (v as any)[key];
+				const guard = (mapping as any)[tag];
+				return guard ? guard(v) : false;
+			}) as Guard<T>,
+			`discUnion(${String(key)})`
+		),
 };
 
 export type IsApi<Ext = {}> = Omit<typeof implementation, 'taggedErr' | 'string' | 'number' | 'array'> & {
@@ -1477,7 +1704,11 @@ export const is = createIs(implementation);
  */
 export function assert<T>(value: unknown, guard: Guard<T>, message?: string): asserts value is T {
 	if (!guard(value)) {
-		throw new Error(message ?? `Value failed type assertion`);
+		throw GuardErrs.GuardErr({
+			msg: message ?? guard.meta?.errorMsg ?? `Value failed type assertion`,
+			expected: guard.meta?.name ?? 'unknown',
+			path: [],
+		});
 	}
 }
 
@@ -1495,7 +1726,7 @@ export function ensure<T>(value: unknown, guard: Guard<T>, message?: string): T 
 }
 
 /**
- * Uses a guard to validate a value, returning a Result.
+ * Uses a guard to validate a value, returning a Result. If the guard fails, it will return the error provided, or a `GuardErr`.
  *
  * @example
  * ```ts
@@ -1507,12 +1738,25 @@ export function ensure<T>(value: unknown, guard: Guard<T>, message?: string): T 
  * }
  * ```
  */
-export function validate<T, E>(value: unknown, guard: Guard<T>, error: E): Result<T, E> {
-	return guard(value) ? ok(value) : err(error);
+export function validate<T, E = null>(
+	value: unknown,
+	guard: Guard<T>,
+	error?: E
+): Result<T, E extends null | undefined ? GuardErr : E> {
+	return guard(value)
+		? ok(value)
+		: (err(
+				error ||
+					GuardErrs.GuardErr({
+						msg: guard.meta?.errorMsg || 'Value failed validation',
+						expected: guard.meta?.name || 'unknown',
+						path: [],
+					})
+			) as Result<T, E extends null | undefined ? GuardErr : E>);
 }
 
 /**
- * Converts a guard into a Result-returning function.
+ * Converts a guard into a Result-returning function. If the guard fails, it will return the error provided, or a `GuardErr`.
  *
  * @example
  * ```ts
@@ -1525,30 +1769,38 @@ export function validate<T, E>(value: unknown, guard: Guard<T>, error: E): Resul
  * }
  * ```
  */
-export function guardToValidator<T, E>(guard: Guard<T>, error: E): (value: unknown) => Result<T, E> {
+export function guardToValidator<T, E = null>(
+	guard: Guard<T>,
+	error?: E
+): (value: unknown) => Result<T, E extends null | undefined ? GuardErr : E> {
 	return (value: unknown) => validate(value, guard, error);
 }
 
 /**
- * Takes a guard and an error, and returns a function
- * that converts a value into a Task.
+ * Takes a guard and an error, and returns a function that converts
+ * a value into a `Task`. If the guard fails, it will return the error
+ * provided, or a `GuardErr`.
  *
  * @param guard The guard to use for validation.
  * @param error The error to return if the guard fails.
  *
  * @example
  * ```ts
- * const validateString = guardToTask(is.string, 'Value must be a string');
- * const result = validateString(value);
+ * const validateValue = guardToTask(is.string, 'Value must be a string')(value); // Task
+ * const result = await validateValue.execute(); // Result
  * if (result.isOk()) {
  *   console.log(result.value); // value is string
  * } else {
- *   console.log(result.error);
+ *   console.log(result.error); // error is string
  * }
  * ```
  */
-export function guardToTask<T, E>(guard: Guard<T>, error: E) {
-	return (value: unknown): Task<T, E> => new Task(() => ResultAsync.fromResult(validate(value, guard, error)));
+export function guardToTask<T, E = null>(
+	guard: Guard<T>,
+	error?: E
+): (value: unknown) => Task<T, E extends null | undefined ? GuardErr : E> {
+	return (value: unknown): Task<T, E extends null | undefined ? GuardErr : E> =>
+		new Task(() => ResultAsync.fromResult(validate(value, guard, error)));
 }
 
 /**
@@ -1604,13 +1856,13 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 		/**
 		 * Synchronously parses a value against the schema.
 		 * @param value The value to parse.
-		 * @returns A Result containing the parsed value or an array of errors.
+		 * @returns A Result containing the parsed value or an array of `GuardErr`.
 		 */
-		parse: (value: unknown, error?: string) => Result<InferSchema<S[K]>, string[]>;
+		parse: (value: unknown, error?: string) => Result<InferSchema<S[K]>, GuardErr[]>;
 		/**
-		 * Synchronously 'asserts' that a value matches the schema (throws if not).
+		 * Synchronously 'asserts' that a value matches the schema (throws `GuardErr` if not).
 		 *
-		 * We use `value is SchemaInfer<S[K]>` instead of `asserts value is SchemaInfer<S[K]>`
+		 * We use `value is x` instead of `asserts value is x`
 		 * because `asserts` does not work with inferred types.
 		 *
 		 * @param value The value to assert.
@@ -1626,37 +1878,61 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 		return [
 			schemaName,
 			{
-				parse: (value: unknown, error?: string) => {
+				parse: (value: unknown) => {
 					if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-						return err([error || `${schemaName}: Expected an object but got ${typeof value}`]);
+						return err([
+							GuardErrs.GuardErr({
+								msg: `${schemaName}: Expected an object but got ${typeof value}`,
+								schema: schemaName,
+								path: [],
+								expected: 'object',
+							}),
+						]);
 					}
-					const errors: string[] = [];
+					const errors: GuardErr[] = [];
 					for (let i = 0; i < entryCount; i++) {
 						const entry = entries[i]!;
 						const [key, guard] = entry;
 						const propertyValue = (value as any)[key];
 						if (!guard(propertyValue)) {
+							const msg = guard.meta?.errorMsg;
 							errors.push(
-								error ||
-									`${schemaName}.${key} failed validation: expected ${guard.name || 'condition'} but got ${JSON.stringify(propertyValue)}`
+								GuardErrs.GuardErr({
+									msg: msg
+										? msg
+										: `${schemaName}.${key} failed validation: expected ${guard.meta?.name || 'unknown'}, but got ${typeof propertyValue} (${JSON.stringify(propertyValue)})`,
+									schema: schemaName,
+									path: [schemaName, key],
+									expected: guard.meta?.name || 'unknown',
+								})
 							);
 						}
 					}
 					return errors.length === 0 ? ok(value as any) : err(errors);
 				},
-				assert: (value: unknown, error?: string) => {
+				assert: (value: unknown, errorMsg?: string) => {
 					if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-						throw new Error(error || `${schemaName}: Expected an object but got ${typeof value}`);
+						throw GuardErrs.GuardErr({
+							msg: errorMsg || `${schemaName}: Expected an object but got ${typeof value}`,
+							schema: schemaName,
+							path: [],
+							expected: 'object',
+						});
 					}
 					for (let i = 0; i < entryCount; i++) {
 						const entry = entries[i]!;
 						const [key, guard] = entry;
 						const propertyValue = (value as any)[key];
 						if (!guard(propertyValue)) {
-							throw new Error(
-								error ||
-									`${schemaName}.${key} failed validation: expected ${guard.name || 'condition'} but got ${JSON.stringify(propertyValue)}`
-							);
+							const msg = guard.meta?.errorMsg || errorMsg;
+							throw GuardErrs.GuardErr({
+								msg: msg
+									? msg
+									: `${schemaName}.${key} failed validation: expected ${guard.meta?.name || 'unknown'}, but got ${typeof propertyValue} (${JSON.stringify(propertyValue)})`,
+								schema: schemaName,
+								path: [schemaName, key],
+								expected: guard.meta?.name || 'unknown',
+							});
 						}
 					}
 					return true;

@@ -1,4 +1,5 @@
-import { is, guardToValidator } from '../src';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import { is, guardToValidator } from '../src/index.js';
 
 const password = 'Hello world!';
 
@@ -48,3 +49,30 @@ const validateObject2 = guardToValidator(
 		.hasOnly(['name', 'age', 'email']),
 	'Invalid object'
 );
+
+const example = is.string.length(8, 24).setErrMsg('Password is too short or too long');
+
+const validateExample = guardToValidator(example, 'Invalid example');
+
+console.log(validateExample('hello'));
+
+const strictTest = is.object({
+	name: is.string,
+	age: is.number,
+}).strict;
+
+console.log(strictTest({ name: 'John', age: 25 }));
+
+if (!is.object.eq({ name: 'John', age: 25 })({ name: 'John' })) {
+	console.log('Object is equal to the specified value');
+}
+
+const validatePassword3 = guardToValidator(
+	is.string.length(8, 24).letters('lowercase', 6).letters('uppercase').numbers().symbols()
+);
+
+const result3 = validatePassword3(password); // Result<string, string>
+if (!result3.ok) {
+	console.error(result3.error.msg);
+}
+// password now has min 1 uppercase, 6 lowercase, min 1 symbol, and min 1 number
