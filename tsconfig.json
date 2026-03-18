@@ -29,6 +29,6 @@
     "skipLibCheck": true,
     "allowJs": true,
   },
-  "include": ["src/**/*", "scratch/example2.ts"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
