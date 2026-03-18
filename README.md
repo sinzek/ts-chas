@@ -9,7 +9,8 @@
 Unlike other utility libraries that attempt to do everything, `chas` focuses heavily on creating a cohesive and tightly-integrated ecosystem. Its modules are built to work perfectly together, giving you type-safety, intelligent errors, and incredibly ergonomic APIs.
 
 At a high level, the `chas` ecosystem provides:
-- **Result & Option**: explicit and type-safe error handling and null-safety without relying on `try/catch`. 
+
+- **Result & Option**: explicit and type-safe error handling and null-safety without relying on `try/catch`.
 - **Task**: resilient and lazy asynchronous operations.
 - **Guard**: chainable validation and schema parsing.
 - **Tagged Errors**: typed, discriminated error unions.
@@ -20,6 +21,7 @@ At a high level, the `chas` ecosystem provides:
 ## The Modules
 
 ### 1. Result API (`chas/result`)
+
 Inspired by Rust and `fp-ts`, `Result<T, E>` and `ResultAsync<T, E>` replace implicit `try...catch` blocks with explicit, monadic error handling.
 
 ```ts
@@ -44,6 +46,7 @@ if (finalResult.isOk()) {
 ```
 
 ### 2. Guard API (`chas/guard`)
+
 A highly expressive, chainable validation and schema parsing system.
 
 ```ts
@@ -61,24 +64,28 @@ const schemas = defineSchemas({
 		id: is.string.uuid('v4'),
 		age: is.number.gte(18),
 		tags: is.array(is.string).min(1),
-	}
+	},
 });
 
-// Parses unknown data into a Result!
+// Parses unknown data into a Result<{ id: string, age: number, tags: string[] }!, GuardErr[]>
 const result = schemas.User.parse(unknownData);
 if (result.isErr()) {
-	console.error(result.error); // Formatted GuardErr[]
+	console.error(result.error.map(e => e.message).join('\n')); // Formatted GuardErr[]
 }
 ```
 
 ### 3. Task API (`chas/task`)
+
 A lazy, promise-like wrapper that empowers async operations with functional chaining, retries, and resilience logic limiters. Under the hood, a Task always resolves to a `ResultAsync`.
 
 ```ts
 import { Task } from 'chas';
 
 // Create a task
-const fetchTask = Task.from(() => fetch('/data'), e => new Error('Fetch failed'));
+const fetchTask = Task.from(
+	() => fetch('/data'),
+	e => new Error('Fetch failed')
+);
 
 // Attach resilience patterns seamlessly
 const resilientTask = fetchTask
@@ -91,6 +98,7 @@ const result = await resilientTask.execute();
 ```
 
 ### 4. Tagged Errors (`chas/tagged-errs`)
+
 Define discriminated unions of native `Error` instances, allowing exhaustive pattern matching on errors with `Result`.
 
 ```ts
@@ -111,6 +119,7 @@ const message = chas.matchError(myResult.unwrapErr(), {
 ```
 
 ### 5. Option API (`chas/option`)
+
 A functional equivalent to nullable values (`T | null | undefined`). An `Option<T>` is effectively an alias for `Result<T, never>`, tightly integrating with the rest of the library.
 
 ```ts
@@ -119,9 +128,7 @@ import { Option } from 'chas';
 const maybeUser = Option.fromNullable(getUserOrNull());
 
 // Easily map over valid values
-const userName = maybeUser
-	.map(user => user.name)
-	.unwrapOr('Anonymous');
+const userName = maybeUser.map(user => user.name).unwrapOr('Anonymous');
 ```
 
 ---
@@ -131,12 +138,14 @@ const userName = maybeUser
 `chas` is structured so that its modules communicate deeply with one another. Whether you're moving between `Option`, `Result`, `Guard`, or `Task`, there are ergonomic pathways built-in.
 
 **Converting a Result to an Option:**
+
 ```ts
 const maybeData = chas.ok(5).toOption(); // Option<number>
 const safelyEmpty = chas.err('fail').toOption(); // Option::None
 ```
 
 **Guard validations directly to Results:**
+
 ```ts
 import { is } from 'chas';
 
@@ -148,6 +157,7 @@ const errResult = validateAge(15); // Result.Err('Must be 18+')
 ```
 
 **Options into Tasks:**
+
 ```ts
 import { Option, Task } from 'chas';
 
@@ -163,10 +173,10 @@ With `chas.go`, you can mix and match `Result` and `ResultAsync` calls in a clea
 ```ts
 const userProfileResult = await chas.go(async function* () {
 	// Yield a ResultAsync
-	const user = yield* fetchUserAsync(); 
-	
+	const user = yield* fetchUserAsync();
+
 	// Yield a synchronous Result
-	const config = yield* parseConfig(user.prefs); 
+	const config = yield* parseConfig(user.prefs);
 
 	return { user, config };
 });
