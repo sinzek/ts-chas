@@ -243,6 +243,26 @@ describe('chas', () => {
 			expect(okValue).toBe('');
 		});
 
+		it('tapTag', () => {
+			const errors = chas.defineErrs({
+				notFound: (message: string) => ({ message }),
+				forbidden: () => ({ message: 'forbidden' }),
+			});
+
+			const res = errors.notFound.err('not found!');
+
+			let example = '';
+			res.tapTag('notFound', e => {
+				example = e.message;
+			});
+			let example2 = '';
+			res.tapTag(errors.notFound, e => {
+				example2 = e.message;
+			});
+			expect(example).toBe('not found!');
+			expect(example2).toBe('not found!');
+		});
+
 		it('asynctapErr', async () => {
 			let value = '';
 			await chas.err('error').asynctapErr(async e => {
@@ -570,6 +590,34 @@ describe('chas', () => {
 			const res2 = await chas.anyAsync(arr2);
 			expect(res2.isErr()).toBe(true);
 			expect(res2.unwrapErr()).toEqual(['a', 'b']);
+		});
+
+		it('race', () => {
+			const arr: chas.Result<number, string>[] = [chas.err('a'), chas.ok(2)];
+			const res1 = chas.race(arr);
+			expect(res1.isErr()).toBe(true);
+			expect(res1.unwrapErr()).toBe('a');
+
+			const arr2: chas.Result<number, string>[] = [chas.ok(1), chas.err('b')];
+			const res2 = chas.race(arr2);
+			expect(res2.isOk()).toBe(true);
+			expect(res2.unwrap()).toBe(1);
+		});
+
+		it('raceAsync', async () => {
+			const p1 = new Promise<chas.Result<number, string>>(resolve => setTimeout(() => resolve(chas.err('a')), 10));
+			const p2 = Promise.resolve(chas.ok(2));
+			const arr: PromiseLike<chas.Result<number, string>>[] = [p1, p2];
+			const res1 = await chas.raceAsync(arr);
+			expect(res1.isOk()).toBe(true);
+			expect(res1.unwrap()).toBe(2);
+
+			const p3 = Promise.resolve(chas.err('b'));
+			const p4 = new Promise<chas.Result<number, string>>(resolve => setTimeout(() => resolve(chas.ok(1)), 10));
+			const arr2: PromiseLike<chas.Result<number, string>>[] = [p3, p4];
+			const res2 = await chas.raceAsync(arr2);
+			expect(res2.isErr()).toBe(true);
+			expect(res2.unwrapErr()).toBe('b');
 		});
 
 		it('collect', () => {

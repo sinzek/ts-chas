@@ -10,6 +10,8 @@ import {
 	anyAsync as resultAnyAsync,
 	collectAsync as resultCollectAsync,
 	ok,
+	type CatchTarget,
+	type CatchTag
 } from './result.js';
 import { type TaggedErr } from './tagged-errs.js';
 import { type Option } from './option.js';
@@ -210,12 +212,12 @@ export class Task<T, E> {
 					if (!task) continue;
 					task.run(ctx).then(res => {
 						if (firstError !== undefined) return;
-						if (res.ok) {
-							results[index] = (res as any).value;
+						if (res.isOk()) {
+							results[index] = res.value;
 							completedCount++;
 							next();
 						} else {
-							firstError = res.error;
+							firstError = res.unwrapErr();
 							resolvePromise(err(firstError));
 						}
 					});
@@ -514,11 +516,11 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err(error)
 	 * ```
 	 */
-	catchTag<Tag extends string, E2 = never>(
-		tag: Tag,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any) => Task<T, E2>
-	): Task<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
-		return new Task(ctx => this.run(ctx).catchTag(tag, e => handler(e).run(ctx) as any) as any);
+	catchTag<Target extends CatchTarget, E2 = never>(
+		target: Target,
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => Task<T, E2>
+	): Task<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2> {
+		return new Task(ctx => this.run(ctx).catchTag(target as any, e => handler(e as any).run(ctx) as any) as any);
 	}
 
 	/**

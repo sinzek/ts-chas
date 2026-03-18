@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { is, guardToValidator } from '../src/index.js';
+import { is, guardToValidator, Result } from '../src/index.js';
 
 const password = 'Hello world!';
 
@@ -76,3 +76,30 @@ if (!result3.ok) {
 	console.error(result3.error.msg);
 }
 // password now has min 1 uppercase, 6 lowercase, min 1 symbol, and min 1 number
+
+function fetchUser(id: number): Result<{ name: string; age: number }, string> {
+	if (id === 1) {
+		return Result.ok({ name: 'John', age: 25 });
+	}
+	return Result.err('User not found');
+}
+
+const answer = fetchUser(1).match({
+	ok: user => `Hello, ${user.name}`,
+	err: err => `Error: ${err}`,
+});
+
+type User = {
+	id: string;
+	name: string;
+};
+
+const myIs = is.extend('app', {
+	validUser: (v: unknown): v is User => is.object({ id: is.string, name: is.string })(v),
+});
+
+const data: unknown = { id: '1', name: 'John' };
+
+if (myIs.app.validUser(data)) {
+	// value is now typed as User
+}

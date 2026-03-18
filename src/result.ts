@@ -30,6 +30,14 @@ export type Err<E> = {
 	readonly error: E;
 };
 
+/** Helper to extract the string tag from either a string or an error factory */
+export type CatchTarget = string | { is: (err: any) => err is { readonly _tag: string } };
+export type CatchTag<Target> = Target extends string
+	? Target
+	: Target extends { is: (err: any) => err is { readonly _tag: infer Tag } }
+		? Tag
+		: never;
+
 /**
  * Helper to safely extract the error type from a union of Results.
  * Bypasses TypeScript's contravariance inference bug.
@@ -590,10 +598,10 @@ export interface ResultMethods<T, E> {
 	readonly swap: () => Result<E, T>;
 
 	/**
-	 * Catches a specific tagged error variant by its `_tag`, handles it, and removes it
+	 * Catches a specific tagged error variant by its `_tag` or error factory, handles it, and removes it
 	 * from the error union. Unmatched tags pass through unchanged.
 	 *
-	 * @param tag The `_tag` value to catch.
+	 * @param target The `_tag` value or error factory to catch.
 	 * @param handler A function that receives the caught error and returns a recovery `Result`.
 	 * @returns A `Result` with the caught tag excluded from the error union.
 	 *
@@ -604,10 +612,28 @@ export interface ResultMethods<T, E> {
 	 * // Result<User, DbError | Unauthorized> — NotFound is gone!
 	 * ```
 	 */
-	readonly catchTag: <Tag extends string, E2 = never>(
-		tag: Tag,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any) => Result<T, E2>
-	) => Result<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2>;
+	readonly catchTag: <Target extends CatchTarget, T2 = T, E2 = never>(
+		target: Target,
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => Result<T2, E2>
+	) => Result<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2>;
+	/**
+	 * Taps into a specific tagged error variant by its `_tag`. The original result is returned unchanged.
+	 *
+	 * @param target The `_tag` value or error factory to tap.
+	 * @param handler A function that receives the caught error.
+	 * @returns The original `Result` unmodified.
+	 *
+	 * @example
+	 * ```ts
+	 * getUser(id)
+	 *     .tapTag('NotFound', () => console.log('User not found'));
+	 * // Result<User, DbError | Unauthorized> — NotFound is gone!
+	 * ```
+	 */
+	readonly tapTag: <Target extends CatchTarget>(
+		target: Target,
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => void
+	) => Result<T, E>;
 
 	[Symbol.iterator](): Generator<Result<T, E>, T, any>;
 	[Symbol.asyncIterator](): AsyncGenerator<Result<T, E>, T, any>;
@@ -925,17 +951,17 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	 * const val = await res; // Ok(10)
 	 * ```
 	 */
-	orElse(f: (error: E) => Result<T, E> | ResultAsync<T, E>): ResultAsync<T, E> {
+	orElse<T2 = T, F = E>(f: (error: E) => Result<T2, F> | ResultAsync<T2, F>): ResultAsync<T | T2, F> {
 		return new ResultAsync(
 			this._promise.then(async res => {
 				if (res.isErr()) {
 					const nextResult = f(res.error);
 					// if the next function returns a ResultAsync, we must await it
 					return nextResult instanceof ResultAsync
-						? ((await nextResult) as Result<T, E>)
-						: (nextResult as Result<T, E>);
+						? ((await nextResult) as Result<T | T2, F>)
+						: (nextResult as Result<T | T2, F>);
 				}
-				return res;
+				return ok(res.value) as Result<T | T2, F>;
 			})
 		);
 	}
@@ -944,7 +970,7 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	 * Resolves the async Result to a final union type `Promise<U | F>`.
 	 * Handlers can be synchronously or asynchronously evaluated.
 	 *
-	 * @param fns Object mapping `ok` and `err` handlers.
+	 * @param fns Object mapping `Ok` and `Err` handlers.
 	 * @returns A standard `Promise` of the extracted matched value.
 	 *
 	 * @example
@@ -962,28 +988,27 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 		});
 	}
 	/**
-	 * Unwraps the async result, returning a Promise that resolves to the `Ok` value,
-	 * or rejects with the `Err` error.
+	 * Unwraps the async result, returning a Promise that resolves to the `Some` value,
+	 * or rejects with the `None` error.
 	 *
 	 * Note: Because `ResultAsync` wraps a `Promise`, this method cannot return synchronously.
 	 * You must `await` the returned Promise to get the value.
 	 *
-	 * @param fns Object mapping `ok` and `err` handlers.
+	 * @param fns Object mapping `Some` and `None` handlers.
 	 * @returns A standard `Promise` of the extracted matched value.
 	 *
 	 * @example
 	 * ```ts
-	 * const val = await chas.okAsync(5).match({
-	 *   ok: v => v * 2,
-	 *   err: e => 0
+	 * const val = await chas.okAsync(5).matchSome({
+	 *   some: v => v * 2,
+	 *   none: () => 0
 	 * }); // 10
 	 * ```
 	 */
-
-	matchSome<U, F>(fns: { Some: (value: T) => U | PromiseLike<U>; None: () => F | PromiseLike<F> }): Promise<U | F> {
+	matchSome<U, F>(fns: { some: (value: T) => U | PromiseLike<U>; none: () => F | PromiseLike<F> }): Promise<U | F> {
 		return this._promise.then(res => {
-			if (res.isSome()) return fns.Some(res.value);
-			return fns.None();
+			if (res.isSome()) return fns.some(res.value);
+			return fns.none();
 		});
 	}
 
@@ -1103,10 +1128,10 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	}
 
 	/**
-	 * Catches a specific tagged error variant by its `_tag`, handles it, and removes it
+	 * Catches a specific tagged error variant by its `_tag` or error factory, handles it, and removes it
 	 * from the error union. Unmatched tags pass through unchanged.
 	 *
-	 * @param tag The `_tag` value to catch.
+	 * @param target The `_tag` value or error factory to catch.
 	 * @param handler A function that receives the caught error and returns a recovery `Result` or `ResultAsync`.
 	 * @returns A `ResultAsync` with the caught tag excluded from the error union.
 	 *
@@ -1117,16 +1142,38 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	 * // ResultAsync<User, DbError | Unauthorized>
 	 * ```
 	 */
-	catchTag<Tag extends string, E2 = never>(
-		tag: Tag,
+	catchTag<Target extends CatchTarget, T2 = T, E2 = never>(
+		target: Target,
 		handler: (
-			error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any
-		) => Result<T, E2> | ResultAsync<T, E2> | PromiseLike<Result<T, E2>>
-	): ResultAsync<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
-		return new ResultAsync(this._promise.then(res => res.catchTag(tag, handler as any) as any)) as ResultAsync<
-			T,
-			[E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2
-		>;
+			error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any
+		) => Result<T2, E2> | ResultAsync<T2, E2> | PromiseLike<Result<T2, E2>>
+	): ResultAsync<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2> {
+		return new ResultAsync(
+			this._promise.then(res => res.catchTag<Target, T2, E2>(target, handler as any))
+		) as ResultAsync<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2>;
+	}
+
+	/**
+	 * Taps into a specific tagged error variant by its `_tag`. The original result is returned unchanged.
+	 *
+	 * @param target The `_tag` value or error factory to tap.
+	 * @param handler A function that receives the caught error.
+	 * @returns The original `Result` unmodified.
+	 *
+	 * @example
+	 * ```ts
+	 * getUser(id)
+	 *     .tapTag('NotFound', () => console.log('User not found'));
+	 * // Result<User, DbError | Unauthorized | NotFound>
+	 * ```
+	 */
+	tapTag<Target extends CatchTarget>(
+		target: Target,
+		handler: (
+			error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any
+		) => void | PromiseLike<void>
+	): ResultAsync<T, E> {
+		return new ResultAsync(this._promise.then(res => res.tapTag(target, handler)));
 	}
 
 	*[Symbol.iterator](): Generator<ResultAsync<T, E>, T, any> {
@@ -1447,15 +1494,51 @@ const ResultMethodsProto = {
 	swap<T, E>(this: Result<T, E>): Result<E, T> {
 		return this.ok ? err(this.value) : ok((this as unknown as Err<E>).error);
 	},
-	catchTag<T, E, Tag extends string, E2 = never>(
+	catchTag<T, E, Target extends CatchTarget, T2 = T, E2 = never>(
 		this: Result<T, E>,
-		tag: Tag,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: Tag }> : any) => Result<T, E2>
-	): Result<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: Tag }> | E2 : E | E2> {
+		target: Target,
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => Result<T2, E2>
+	): Result<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2> {
 		if (this.ok) return this as any;
 		const error = (this as unknown as Err<any>).error;
-		if (error !== null && typeof error === 'object' && '_tag' in error && error._tag === tag) {
-			return handler(error as any) as any;
+		if (typeof target === 'string') {
+			if (error !== null && typeof error === 'object' && '_tag' in error && error._tag === target) {
+				return handler(error as any) as any;
+			}
+		} else if (
+			target !== null &&
+			(typeof target === 'object' || typeof target === 'function') &&
+			'is' in target &&
+			typeof target.is === 'function'
+		) {
+			if (target.is(error)) {
+				return handler(error as any) as any;
+			}
+		}
+		return this as any;
+	},
+	tapTag<T, E, Target extends CatchTarget>(
+		this: Result<T, E>,
+		target: Target,
+		handler: (
+			error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any
+		) => void | PromiseLike<void>
+	): Result<T, E> {
+		if (this.ok) return this as any;
+		const error = (this as unknown as Err<any>).error;
+		if (typeof target === 'string') {
+			if (error !== null && typeof error === 'object' && '_tag' in error && error._tag === target) {
+				handler(error as any);
+			}
+		} else if (
+			target !== null &&
+			(typeof target === 'object' || typeof target === 'function') &&
+			'is' in target &&
+			typeof target.is === 'function'
+		) {
+			if (target.is(error)) {
+				handler(error as any);
+			}
 		}
 		return this as any;
 	},
@@ -1744,8 +1827,6 @@ export function all(results: Iterable<Result<any, any>>): Result<any, any> {
  * const allAsync = chas.allAsync([p1, p2]); // Resolves to Ok([1, 2])
  * ```
  */
-// @ts-expect-error - TS2394: complex mapped-tuple return type through ResultAsync's private fields
-//   causes a false-positive overload incompatibility. The implementation handles both overloads correctly.
 export function allAsync<T extends readonly PromiseLike<Result<any, any>>[] | []>(
 	promises: T
 ): ResultAsync<
@@ -1806,8 +1887,6 @@ export function any(results: Iterable<Result<any, any>>): Result<any, any[]> {
  * await chas.anyAsync([chas.errAsync('a'), chas.okAsync(2)]); // Ok(2)
  * ```
  */
-// @ts-expect-error - TS2394: complex mapped-tuple return type through ResultAsync's private fields
-//   causes a false-positive overload incompatibility. The implementation handles both overloads correctly.
 export function anyAsync<T extends readonly PromiseLike<Result<any, any>>[] | []>(
 	promises: T
 ): ResultAsync<
@@ -1826,6 +1905,51 @@ export function anyAsync(promises: Iterable<PromiseLike<Result<any, any>>>): Res
 			return err(errors);
 		})
 	);
+}
+
+/**
+ * Returns the first `Result` encountered from an iterable, regardless of whether it is `Ok` or `Err`.
+ * In synchronous contexts, this simply evaluates to the first element since it evaluates left-to-right.
+ *
+ * @param results Iterable of Results.
+ * @returns The first `Result`.
+ *
+ * @example
+ * ```ts
+ * chas.race([chas.err('a'), chas.ok(2)]); // Err('a')
+ * chas.race([chas.ok(1), chas.err('b')]); // Ok(1)
+ * ```
+ */
+export function race<T extends readonly Result<any, any>[] | []>(results: T): T[number];
+export function race<T, E>(results: Iterable<Result<T, E>>): Result<T, E>;
+export function race(results: Iterable<Result<any, any>>): Result<any, any> {
+	for (const result of results) {
+		return result;
+	}
+	throw new Error('chas.race was called with an empty iterable');
+}
+
+/**
+ * Returns the first resolved `Result` from an iterable of async results,
+ * regardless of whether it is an `Ok` or an `Err`.
+ *
+ * @param promises Iterable of Promises resolving to `Result`s.
+ * @returns A `ResultAsync` resolving to the first outcome.
+ *
+ * @example
+ * ```ts
+ * await chas.raceAsync([chas.errAsync('a'), chas.okAsync(2)]); // Whichever resolves first
+ * ```
+ */
+export function raceAsync<T extends readonly PromiseLike<Result<any, any>>[] | []>(
+	promises: T
+): ResultAsync<
+	{ [P in keyof T]: T[P] extends PromiseLike<infer R> ? ExtractOkValue<R> : never }[number],
+	{ [P in keyof T]: T[P] extends PromiseLike<infer R> ? ExtractErrError<R> : never }[number]
+>;
+export function raceAsync<T, E>(promises: Iterable<PromiseLike<Result<T, E>>>): ResultAsync<T, E>;
+export function raceAsync(promises: Iterable<PromiseLike<Result<any, any>>>): ResultAsync<any, any> {
+	return new ResultAsync(Promise.race(promises));
 }
 
 /**
@@ -1875,8 +1999,6 @@ export function collect(results: Iterable<Result<any, any>>): Result<any[], any[
  * await chas.collectAsync([chas.okAsync(1), chas.errAsync('a'), chas.errAsync('b')]); // Err(['a', 'b'])
  * ```
  */
-// @ts-expect-error - TS2394: complex mapped-tuple return type through ResultAsync's private fields
-//   causes a false-positive overload incompatibility. The implementation handles both overloads correctly.
 export function collectAsync<T extends readonly PromiseLike<Result<any, any>>[] | []>(
 	promises: T
 ): ResultAsync<
@@ -2207,6 +2329,7 @@ export const Result = {
 	err,
 	all,
 	any,
+	race,
 	collect,
 	tryCatch,
 	fromPromise,
@@ -2233,6 +2356,7 @@ const resultGo = go;
 export namespace ResultAsync {
 	export const all = allAsync;
 	export const any = anyAsync;
+	export const race = raceAsync;
 	export const collect = collectAsync;
 	export const withResult = withResultAsync;
 	export const withRetry = withRetryAsync;

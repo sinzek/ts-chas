@@ -13,7 +13,7 @@ import { type Guard } from './guard.js';
  * ```
  */
 export type None = Err<never> &
-	Omit<ResultMethods<never, never>, 'unwrap'> & {
+	ResultMethods<never, never> & {
 		/**
 		 * @deprecated You generally don't need to unwrap an Option. Since it's None, it will always throw undefined.
 		 *
@@ -42,7 +42,7 @@ export type None = Err<never> &
  * ```
  */
 export type Some<T> = Ok<NonVoid<T>> &
-	Omit<ResultMethods<NonVoid<T>, never>, 'unwrap'> & {
+	ResultMethods<NonVoid<T>, never> & {
 		value: NonVoid<T>;
 
 		/**
@@ -182,7 +182,7 @@ export const Option = {
 	none,
 	fromNullable,
 	fromNullableAsync,
-	optionFromGuard,
+	fromGuard: optionFromGuard,
 	someAsync,
 	noneAsync,
 } as const;

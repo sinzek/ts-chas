@@ -1586,6 +1586,25 @@ const implementation = {
 		),
 };
 
+/**
+ * The IsApi type represents the full API of the guard module.
+ * It is a generic type that can be extended with additional guards.
+ *
+ * @template Ext - An object containing sub-namespaces of guards to extend the API.
+ *
+ * @example Extending the API with a new sub-namespace
+ * ```ts
+ * import { is } from 'chas/guard';
+ *
+ * const myIs = is.extend('app', {
+ *   validUser: (v: unknown): v is User => is.object({ id: is.string })(v),
+ * });
+ *
+ * if (myIs.app.validUser(data)) {
+ *   // value is now typed as User
+ * }
+ * ```
+ */
 export type IsApi<Ext = {}> = Omit<typeof implementation, 'taggedErr' | 'string' | 'number' | 'array'> & {
 	readonly string: ChainableStringGuard;
 	readonly number: ChainableNumberGuard;
@@ -1593,7 +1612,7 @@ export type IsApi<Ext = {}> = Omit<typeof implementation, 'taggedErr' | 'string'
 	readonly taggedErr: TaggedFn;
 	/**
 	 * Extends the guard API with a new sub-namespace.
-	 * @param namespace The name of the sub-namespace.
+	 * @param namespace The name of the sub-namespace (e.g. 'app').
 	 * @param guards An object containing the new guards.
 	 * @returns A new IsApi instance that includes the extended guards.
 	 *
@@ -1748,7 +1767,9 @@ export function validate<T, E = null>(
 		: (err(
 				error ||
 					GuardErrs.GuardErr({
-						msg: guard.meta?.errorMsg || 'Value failed validation',
+						msg:
+							guard.meta?.errorMsg ||
+							`Value failed validation: expected ${guard.meta?.name}, but got ${typeof value} (${JSON.stringify(value)})`,
 						expected: guard.meta?.name || 'unknown',
 						path: [],
 					})
