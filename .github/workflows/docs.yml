@@ -36,4 +36,9 @@ jobs:
                   git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
             - name: Build and deploy docs
-              run: pnpm run docs:deploy
+              run: pnpm run docs:deploy:ci
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Deploy to GitHub Pages
+              uses: peaceiris/actions-gh-pages@v4

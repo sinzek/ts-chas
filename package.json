@@ -55,7 +55,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "docs": "typedoc --out docs",
-    "docs:deploy": "pnpm run docs && gh-pages -d docs"
+    "docs:deploy": "pnpm run docs && gh-pages -d docs",
+    "docs:deploy:ci": "pnpm run docs && gh-pages -d docs -r https://x-access-token:${GITHUB_TOKEN}@github.com/sinzek/chas.git"
   },
   "keywords": [],
   "author": "",
