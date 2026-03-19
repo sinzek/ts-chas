@@ -27,39 +27,74 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./tagged-errs": {
-      "types": "./dist/tagged-errs.d.ts",
-      "import": "./dist/tagged-errs.js",
-      "require": "./dist/tagged-errs.cjs"
+      "import": {
+        "types": "./dist/tagged-errs.d.ts",
+        "default": "./dist/tagged-errs.js"
+      },
+      "require": {
+        "types": "./dist/tagged-errs.d.cts",
+        "default": "./dist/tagged-errs.cjs"
+      }
     },
     "./result": {
-      "types": "./dist/result.d.ts",
-      "import": "./dist/result.js",
-      "require": "./dist/result.cjs"
+      "import": {
+        "types": "./dist/result.d.ts",
+        "default": "./dist/result.js"
+      },
+      "require": {
+        "types": "./dist/result.d.cts",
+        "default": "./dist/result.cjs"
+      }
     },
     "./option": {
-      "types": "./dist/option.d.ts",
-      "import": "./dist/option.js",
-      "require": "./dist/option.cjs"
+      "import": {
+        "types": "./dist/option.d.ts",
+        "default": "./dist/option.js"
+      },
+      "require": {
+        "types": "./dist/option.d.cts",
+        "default": "./dist/option.cjs"
+      }
     },
     "./task": {
-      "types": "./dist/task.d.ts",
-      "import": "./dist/task.js",
-      "require": "./dist/task.cjs"
+      "import": {
+        "types": "./dist/task.d.ts",
+        "default": "./dist/task.js"
+      },
+      "require": {
+        "types": "./dist/task.d.cts",
+        "default": "./dist/task.cjs"
+      }
     },
     "./guard": {
-      "types": "./dist/guard.d.ts",
-      "import": "./dist/guard.js",
-      "require": "./dist/guard.cjs"
+      "import": {
+        "types": "./dist/guard.d.ts",
+        "default": "./dist/guard.js"
+      },
+      "require": {
+        "types": "./dist/guard.d.cts",
+        "default": "./dist/guard.cjs"
+      }
     },
     "./pipe": {
-      "types": "./dist/pipe.d.ts",
-      "import": "./dist/pipe.js",
-      "require": "./dist/pipe.cjs"
+      "import": {
+        "types": "./dist/pipe.d.ts",
+        "default": "./dist/pipe.js"
+      },
+      "require": {
+        "types": "./dist/pipe.d.cts",
+        "default": "./dist/pipe.cjs"
+      }
     }
   },
   "files": [
