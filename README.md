@@ -1,5 +1,3 @@
-# chas
-
 `chas` is a functional programming and utility library for TypeScript. It provides an ergonomic set of tools and [monads](<https://en.wikipedia.org/wiki/Monad_(computer_science)>) for explicitly handling errors, defining runtime types, input validation, managing asynchronous operations, and composing functions.
 
 [**View the full API documentation here!**](https://sinzek.github.io/chas/)
@@ -353,13 +351,13 @@ const userProfileResult = await userProfileTask.execute();
 ## Installation
 
 ```bash
-npm install chas
+npm install ts-chas
 # or
-yarn add chas
+yarn add ts-chas
 # or
-pnpm add chas
+pnpm add ts-chas
 ```
 
-## Contributing
+## Contributions
 
 I'm always open to contributions! Feel free to open an issue or submit a PR.
