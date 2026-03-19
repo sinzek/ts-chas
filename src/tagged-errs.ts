@@ -18,7 +18,7 @@ type ErrorDefinitions = Record<string, (...args: any[]) => object>;
 
 /** Helper type to infer the exact union of errors produced by an ErrorDefinitions object */
 type InferErrorsFromDef<T extends ErrorDefinitions, B extends Record<string, unknown> = {}> = {
-	[K in keyof T & string]: Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr;
+	[K in keyof T & string]: Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>;
 }[keyof T & string];
 
 /**
@@ -26,9 +26,44 @@ type InferErrorsFromDef<T extends ErrorDefinitions, B extends Record<string, unk
  */
 export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, unknown> = {}> = {
 	readonly [K in keyof T & string]: {
-		(...args: Parameters<T[K]>): Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr;
+		(...args: Parameters<T[K]>): Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>;
+		/**
+		 * Creates a Result with an Err variant of this error type. Useful for returning an Err variant of this error type from a function that returns a Result.
+		 * @param args The arguments to pass to the error factory function.
+		 * @returns A Result with an Err variant of this error type.
+		 *
+		 * @example
+		 * ```ts
+		 * const result = AppError.NotFound.err('user', '123');
+		 * // result is Result<never, NotFoundErr>
+		 * ```
+		 */
 		err: <Val = never>(...args: Parameters<T[K]>) => Result<Val, InferErrorsFromDef<T, B>>;
-		is: (err: unknown) => err is Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr;
+		/**
+		 * Creates a ResultAsync with an Err variant of this error type. Useful for returning an Err variant of this error type from a function that returns a ResultAsync.
+		 * @param args The arguments to pass to the error factory function.
+		 * @returns A ResultAsync with an Err variant of this error type.
+		 *
+		 * @example
+		 * ```ts
+		 * const result = AppError.NotFound.errAsync('user', '123');
+		 * // result is ResultAsync<never, NotFoundErr>
+		 * ```
+		 */
+		errAsync: <Val = never>(...args: Parameters<T[K]>) => ResultAsync<Val, InferErrorsFromDef<T, B>>;
+		/**
+		 * Checks if an error is an instance of this error type.
+		 * @param err The error to check.
+		 * @returns `true` if the error is an instance of this error type, `false` otherwise.
+		 *
+		 * @example
+		 * ```ts
+		 * if (AppError.NotFound.is(err)) {
+		 *     console.log(err.resource, err.id); // err is NotFoundErr
+		 * }
+		 * ```
+		 */
+		is: (err: unknown) => err is Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>;
 
 		/**
 		 * Synchronously executes a function and returns the result as an `Ok`.
@@ -49,11 +84,11 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
 			? <Val>(
 					fn: () => Val,
 					onThrow?: (error: unknown) => []
-				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>
+				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>>
 			: <Val>(
 					fn: () => Val,
 					onThrow: (error: unknown) => Parameters<T[K]>
-				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>;
+				) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>>;
 
 		/**
 		 * Asynchronously executes a function and returns the result as an `Ok`.
@@ -74,11 +109,11 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
 			? <Val>(
 					fn: () => Promise<Val>,
 					onThrow?: (error: unknown) => []
-				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>
+				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>>
 			: <Val>(
 					fn: () => Promise<Val>,
 					onThrow: (error: unknown) => Parameters<T[K]>
-				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B> & TaggedErr>;
+				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>>;
 	};
 };
 
@@ -211,6 +246,10 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 
 		factory.err = (...args: unknown[]) => {
 			return err(factory(...args));
+		};
+
+		factory.errAsync = (...args: unknown[]) => {
+			return fromPromise(Promise.resolve(), () => factory(...args));
 		};
 
 		factory.is = (err: any): err is any => {

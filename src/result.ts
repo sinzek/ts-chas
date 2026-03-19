@@ -1702,9 +1702,12 @@ export const err = <E = unknown, T = never>(error: E): Result<T, E> => {
  */
 export const fromPromise = <T, E = unknown>(
 	promise: Promise<T>,
-	onRejected: (error: unknown) => E
-): ResultAsync<T, E> => {
-	return new ResultAsync(promise.then(v => ok<T, E>(v)).catch(e => err<E, T>(onRejected(e))));
+	onRejected?: (error: unknown) => E
+): ResultAsync<T, E extends null | undefined ? unknown : E> => {
+	return new ResultAsync(promise.then(v => ok<T, E>(v)).catch(e => err<E, T>(onRejected?.(e) ?? e))) as ResultAsync<
+		T,
+		E extends null | undefined ? unknown : E
+	>;
 };
 
 /**
@@ -1729,7 +1732,7 @@ export const fromSafePromise = <T>(promise: Promise<T>): ResultAsync<T, never> =
  * Returns `Ok` with the function's return value, or `Err` if an exception occurred.
  *
  * @param fn The synchronous function to execute.
- * @param onThrow A function to map the thrown exception to an error type `E`.
+ * @param onThrow A function to map the thrown exception to an error type `E`. If not provided, the thrown exception is returned as the error value typed as `unknown`.
  * @returns A `Result` evaluating the function.
  *
  * @example
@@ -1737,11 +1740,14 @@ export const fromSafePromise = <T>(promise: Promise<T>): ResultAsync<T, never> =
  * const parseJson = (str: string) => chas.tryCatch(() => JSON.parse(str), e => new Error('Invalid JSON'));
  * ```
  */
-export const tryCatch = <T, E>(fn: () => T, onThrow: (error: unknown) => E): Result<T, E> => {
+export const tryCatch = <T, E = unknown>(
+	fn: () => T,
+	onThrow?: (error: unknown) => E
+): Result<T, E extends null | undefined ? unknown : E> => {
 	try {
 		return ok(fn());
 	} catch (e) {
-		return err(onThrow(e));
+		return err(onThrow?.(e) ?? e) as Result<T, E extends null | undefined ? unknown : E>;
 	}
 };
 
@@ -2029,7 +2035,7 @@ export function collectAsync(promises: Iterable<PromiseLike<Result<any, any>>>):
  * instead of throwing.
  *
  * @param fn The function to wrap.
- * @param onThrow A function to map thrown exceptions to an error type `E`.
+ * @param onThrow A function to map thrown exceptions to an error type `E`. If not provided, the thrown exception is returned as the error value typed as `unknown`.
  * @returns A new function returning `Result<T, E>`.
  *
  * @example
@@ -2038,12 +2044,15 @@ export function collectAsync(promises: Iterable<PromiseLike<Result<any, any>>>):
  * const res = safeParse('{"a": 1}'); // Ok({ a: 1 })
  * ```
  */
-export const withResult = <Args extends unknown[], T, E>(fn: (...args: Args) => T, onThrow: (error: unknown) => E) => {
-	return (...args: Args): Result<T, E> => {
+export const withResult = <Args extends unknown[], T, E = unknown>(
+	fn: (...args: Args) => T,
+	onThrow?: (error: unknown) => E
+): ((...args: Args) => Result<T, E extends null | undefined ? unknown : E>) => {
+	return (...args: Args): Result<T, E extends null | undefined ? unknown : E> => {
 		try {
 			return ok(fn(...args));
 		} catch (e) {
-			return err(onThrow(e));
+			return err(onThrow?.(e) ?? e) as Result<T, E extends null | undefined ? unknown : E>;
 		}
 	};
 };
@@ -2053,7 +2062,7 @@ export const withResult = <Args extends unknown[], T, E>(fn: (...args: Args) => 
  * instead of rejecting or throwing.
  *
  * @param fn The async function to wrap.
- * @param onThrow A function to map thrown exceptions or rejections to an error type `E`.
+ * @param onThrow A function to map thrown exceptions or rejections to an error type `E`. If not provided, the thrown exception is returned as the error value typed as `unknown`.
  * @returns A new function returning `ResultAsync<T, E>`.
  *
  * @example
@@ -2063,11 +2072,11 @@ export const withResult = <Args extends unknown[], T, E>(fn: (...args: Args) => 
  * const res = await safeFetch('https://api.example.com'); // Ok(Response) or Err(ErrorString)
  * ```
  */
-export const withResultAsync = <Args extends unknown[], T, E>(
+export const withResultAsync = <Args extends unknown[], T, E = unknown>(
 	fn: (...args: Args) => Promise<T>,
-	onThrow: (error: unknown) => E
+	onThrow?: (error: unknown) => E
 ) => {
-	return (...args: Args): ResultAsync<T, E> => {
+	return (...args: Args): ResultAsync<T, E extends null | undefined ? unknown : E> => {
 		return fromPromise(fn(...args), onThrow);
 	};
 };
