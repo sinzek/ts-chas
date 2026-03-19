@@ -16,7 +16,7 @@ At a high level, the `chas` ecosystem provides:
 
 ---
 
-## The Modules
+## Modules
 
 ### 1. Result API (`chas/result`)
 
