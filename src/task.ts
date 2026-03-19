@@ -11,7 +11,7 @@ import {
 	collectAsync as resultCollectAsync,
 	ok,
 	type CatchTarget,
-	type CatchTag
+	type CatchTag,
 } from './result.js';
 import { type TaggedErr } from './tagged-errs.js';
 import { type Option } from './option.js';
@@ -46,7 +46,10 @@ export class Task<T, E> {
 	 * @param onError function that maps an unknown error to an error of type E
 	 * @returns a Task
 	 */
-	static from<T, E>(fn: () => Promise<T>, onError: (e: unknown) => E): Task<T, E> {
+	static from<T, E = unknown>(
+		fn: () => Promise<T>,
+		onError?: (e: unknown) => E
+	): Task<T, E extends null | undefined ? unknown : E> {
 		return new Task(() => fromPromise(fn(), onError));
 	}
 
