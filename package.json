@@ -1,5 +1,5 @@
 {
-  "name": "chas-ts",
+  "name": "ts-chas",
   "version": "1.0.1",
   "type": "module",
   "description": "A functional programming and utility library for TypeScript that provides tools for explicit error handling, runtime validation, and asynchronous operations.",
