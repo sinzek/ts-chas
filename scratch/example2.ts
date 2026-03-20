@@ -103,3 +103,7 @@ const data: unknown = { id: '1', name: 'John' };
 if (myIs.app.validUser(data)) {
 	// value is now typed as User
 }
+
+if (is.record(is.string, is.string).hasOnly(['a', 'b'])(data)) {
+	console.log(data.a);
+}

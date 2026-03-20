@@ -605,7 +605,9 @@ describe('chas', () => {
 		});
 
 		it('raceAsync', async () => {
-			const p1 = new Promise<chas.Result<number, string>>(resolve => setTimeout(() => resolve(chas.err('a')), 10));
+			const p1 = new Promise<chas.Result<number, string>>(resolve =>
+				setTimeout(() => resolve(chas.err('a')), 10)
+			);
 			const p2 = Promise.resolve(chas.ok(2));
 			const arr: PromiseLike<chas.Result<number, string>>[] = [p1, p2];
 			const res1 = await chas.raceAsync(arr);
@@ -649,8 +651,8 @@ describe('chas', () => {
 			expect(res2.unwrap()).toEqual([1, 2]);
 		});
 
-		it('withResult', () => {
-			const fn = chas.withResult(
+		it('wrap', () => {
+			const fn = chas.wrap(
 				(a: number, b: number) => {
 					if (b === 0) throw new Error('div by 0');
 					return a / b;
@@ -662,8 +664,8 @@ describe('chas', () => {
 			expect(fn(4, 0).unwrapErr()).toBe('div by 0');
 		});
 
-		it('withResultAsync', async () => {
-			const fn = chas.withResultAsync(
+		it('wrapAsync', async () => {
+			const fn = chas.wrapAsync(
 				async (a: number, b: number) => {
 					if (b === 0) throw new Error('div by 0');
 					return a / b;

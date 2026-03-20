@@ -62,9 +62,15 @@ export type ExtractOkValue<T> = T extends { ok: true; value: infer U } ? U : nev
  */
 export type ExtractErrError<T> = T extends { ok: false; error: infer E } ? E : never;
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const errs = defineErrs({
+const _errsDef = {
 	ChasErr: (message: string, origin: string, cause?: unknown) => ({ message, origin, cause }),
+};
+let _errs: ReturnType<typeof defineErrs<typeof _errsDef>> | null = null;
+const errs = new Proxy({} as ReturnType<typeof defineErrs<typeof _errsDef>>, {
+	get(_, prop) {
+		if (!_errs) _errs = defineErrs(_errsDef);
+		return (_errs as any)[prop];
+	},
 });
 
 export type ChasErr = InferErr<typeof errs, 'ChasErr'>;
@@ -2171,7 +2177,7 @@ export function collectAsync(promises: Iterable<PromiseLike<Result<any, any>>>):
  *
  * @example
  * ```ts
- * const safeParse = chas.withResult(JSON.parse, e => new Error('Failed to parse'));
+ * const safeParse = chas.wrap(JSON.parse, e => new Error('Failed to parse'));
  * const res = safeParse('{"a": 1}'); // Ok({ a: 1 })
  * ```
  */
@@ -2199,7 +2205,7 @@ export const wrap = <Args extends unknown[], T, E = unknown>(
  * @example
  * ```ts
  * const fetchUrl = async (url: string) => { ... }
- * const safeFetch = chas.withResultAsync(fetchUrl, e => String(e));
+ * const safeFetch = chas.wrapAsync(fetchUrl, e => String(e));
  * const res = await safeFetch('https://api.example.com'); // Ok(Response) or Err(ErrorString)
  * ```
  */
@@ -2534,6 +2540,7 @@ export const Result = {
 	fromPromise,
 	fromSafePromise,
 	wrap,
+	all,
 	go,
 	partition,
 	reattachMethods: reattachResultMethods,

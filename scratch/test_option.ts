@@ -1,6 +1,6 @@
 import { chas } from '../src/index.js';
 
-const { some, none, fromNullable, someAsync, noneAsync } = chas;
+const { some, none, nullable, someAsync, noneAsync } = chas;
 
 async function run() {
 	console.log('Testing Option...');
@@ -13,11 +13,11 @@ async function run() {
 	console.log('none().isNone():', n.isNone()); // true
 	console.log('none().unwrapOr(10):', n.unwrapOr(10)); // 10
 
-	const opt = fromNullable(null);
-	console.log('fromNullable(null).isNone():', opt.isNone()); // true
+	const opt = nullable(null);
+	console.log('nullable(null).isNone():', opt.isNone()); // true
 
-	const opt2 = fromNullable(42);
-	console.log('fromNullable(42).isSome():', opt2.isSome()); // true
+	const opt2 = nullable(42);
+	console.log('nullable(42).isSome():', opt2.isSome()); // true
 
 	const res = s.toOption();
 	console.log('some(5).toOption().isOk():', res.isOk()); // true

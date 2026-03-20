@@ -19,7 +19,7 @@ describe('Namespace Structure', () => {
 		});
 
 		it('has async aliases', () => {
-			expect(Result.okAsync(1)).toBeDefined();
+			expect(ResultAsync.ok(1)).toBeDefined();
 		});
 
 		it('merges type and value', () => {
@@ -69,7 +69,7 @@ describe('Namespace Structure', () => {
 		it('still has top-level exports in chas object', () => {
 			expect(chas.ok(1)).toBeDefined();
 			expect(chas.some(1)).toBeDefined();
-			expect(chas.fromNullable(null)).toBeDefined();
+			expect(chas.nullable(null)).toBeDefined();
 		});
 
 		it('still has named exports', () => {

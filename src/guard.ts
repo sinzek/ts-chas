@@ -5,7 +5,7 @@ import { Task } from './task.js';
 import { type UnionToIntersection, deepEqual } from './utils.js';
 
 const GuardErrs = defineErrs({
-	GuardErr: (props: { msg: string; path: string[]; expected: string; schema?: string }) => props,
+	GuardErr: (props: { msg: string; path: string[]; expected: string; actual: string; schema?: string }) => props,
 });
 /**
  * The error type that is used by default when parsing a guard.
@@ -172,12 +172,6 @@ interface StringHelpers extends CommonHelpers<ChainableStringGuard> {
 	 * @param substrings The substrings to check for.
 	 */
 	readonly includesNone: (substrings: string[]) => ChainableStringGuard;
-	/**
-	 * Checks if the string includes only the specified substrings.
-	 * @param substrings The substrings to check for.
-	 */
-	readonly includesOnly: (substrings: string[]) => ChainableStringGuard;
-
 	/**
 	 * Checks if the string includes spaces. If no arguments are provided, it will check for at least one space.
 	 * @param minSpaces The minimum number of spaces.
@@ -499,6 +493,14 @@ type ObjectFactory = {
 	<T extends Record<string, any>>(shape?: { [K in keyof T]: Guard<T[K]> }): ChainableObjectGuard<T>;
 } & ObjectHelpers<any>;
 
+type PartialFactory = {
+	<T extends Record<string, any>>(shape?: { [K in keyof T]?: Guard<T[K]> }): ChainableObjectGuard<Partial<T>>;
+} & ObjectHelpers<Partial<any>>;
+
+type RecordFactory = {
+	<K extends string | number | symbol, V>(keyGuard: Guard<K>, valGuard: Guard<V>): ChainableObjectGuard<Record<K, V>>;
+} & ObjectHelpers<Record<string | number | symbol, any>>;
+
 /**
  * Helper to identify a factory produced by the errors() utility.
  * It identifies any object/function that has an .is guard.
@@ -678,6 +680,20 @@ const RGX = {
 	},
 };
 
+const objectHelpers = {
+	has: <T = any>(key: keyof T) => ((v: any) => key in v) as Guard<T>,
+	notHas: <T = any>(key: keyof T) => ((v: any) => !(key in v)) as Guard<T>,
+	hasAll: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.every(key => key in v)) as Guard<T>,
+	hasAny: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.some(key => key in v)) as Guard<T>,
+	hasNone: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.every(key => !(key in v))) as Guard<T>,
+	hasOnly: <T = any>(keys: (keyof T)[]) =>
+		((v: any) =>
+			keys.every(key => key in v) && Object.keys(v).every(key => keys.includes(key as keyof T))) as Guard<T>,
+	eq: <T = any>(value: T) => ((v: any) => deepEqual(v, value)) as Guard<T>,
+	where: <T = any>(predicate: (v: T) => boolean) =>
+		((v: any) => typeof v === 'object' && v !== null && predicate(v)) as Guard<T>,
+};
+
 /**
  * @internal
  */
@@ -757,21 +773,26 @@ const implementation = {
 			((v: unknown) => typeof v === 'string' && substrings.some(s => v.includes(s))) as Guard<string>,
 		includesAll: (substrings: string[]) =>
 			((v: unknown) => typeof v === 'string' && substrings.every(s => v.includes(s))) as Guard<string>,
-		spaces: (minSpaces: number = 1, maxSpaces: number = Infinity) =>
-			((v: unknown) =>
-				typeof v === 'string' &&
-				(v.match(/\s/g) ?? []).length >= minSpaces &&
-				(v.match(/\s/g) ?? []).length <= maxSpaces) as Guard<string>,
-		symbols: (minSymbols: number = 1, maxSymbols: number = Infinity) =>
-			((v: unknown) =>
-				typeof v === 'string' &&
-				(v.match(/[^a-zA-Z0-9\s]/g) ?? []).length >= minSymbols &&
-				(v.match(/[^a-zA-Z0-9\s]/g) ?? []).length <= maxSymbols) as Guard<string>,
-		numbers: (minNumbers: number = 1, maxNumbers: number = Infinity) =>
-			((v: unknown) =>
-				typeof v === 'string' &&
-				(v.match(/\d/g) ?? []).length >= minNumbers &&
-				(v.match(/\d/g) ?? []).length <= maxNumbers) as Guard<string>,
+		includesNone: (substrings: string[]) =>
+			((v: unknown) => typeof v === 'string' && substrings.every(s => !v.includes(s))) as Guard<string>,
+		spaces: (minSpaces = 1, maxSpaces = Infinity) =>
+			((v: unknown) => {
+				if (typeof v !== 'string') return false;
+				const count = (v.match(/\s/g) ?? []).length;
+				return count >= minSpaces && count <= maxSpaces;
+			}) as Guard<string>,
+		symbols: (minSymbols = 1, maxSymbols = Infinity) =>
+			((v: unknown) => {
+				if (typeof v !== 'string') return false;
+				const count = (v.match(/[^a-zA-Z0-9\s]/g) ?? []).length;
+				return count >= minSymbols && count <= maxSymbols;
+			}) as Guard<string>,
+		numbers: (minNumbers = 1, maxNumbers = Infinity) =>
+			((v: unknown) => {
+				if (typeof v !== 'string') return false;
+				const count = (v.match(/\d/g) ?? []).length;
+				return count >= minNumbers && count <= maxNumbers;
+			}) as Guard<string>,
 		letters: (
 			type: 'uppercase' | 'lowercase' | 'mixedcase' = 'mixedcase',
 			minLetters: number = 1,
@@ -1119,18 +1140,7 @@ const implementation = {
 					shape,
 				}
 			) as ChainableObjectGuard<T>,
-		{
-			has: <T = any>(key: keyof T) => ((v: any) => key in v) as Guard<T>,
-			notHas: <T = any>(key: keyof T) => ((v: any) => !(key in v)) as Guard<T>,
-			hasAll: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.every(key => key in v)) as Guard<T>,
-			hasAny: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.some(key => key in v)) as Guard<T>,
-			hasNone: <T = any>(keys: (keyof T)[]) => ((v: any) => keys.every(key => !(key in v))) as Guard<T>,
-			hasOnly: <T = any>(keys: (keyof T)[]) =>
-				((v: any) =>
-					keys.every(key => key in v) &&
-					Object.keys(v).every(key => keys.includes(key as keyof T))) as Guard<T>,
-			eq: <T = any>(value: T) => ((v: any) => deepEqual(v, value)) as Guard<T>,
-		}
+		objectHelpers
 	) as ObjectFactory,
 	/**
 	 * Checks if a value is a partial object.
@@ -1158,16 +1168,19 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	partial: <T extends object>(shape: { [K in keyof T]: Guard<T[K]> }): Guard<Partial<T>> =>
-		setTypeName(
-			(v => {
-				if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-				return Object.entries(shape).every(
-					([k, g]) => (v as any)[k] === undefined || (g as any)((v as any)[k])
-				);
-			}) as Guard<Partial<T>>,
-			`partial<${Object.keys(shape).join(', ')}>`
-		),
+	partial: makeChainable(
+		<T extends Record<string, any>>(shape: { [K in keyof T]: Guard<T[K]> }): Guard<Partial<T>> =>
+			setTypeName(
+				(v => {
+					if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+					return Object.entries(shape).every(
+						([k, g]) => (v as any)[k] === undefined || (g as any)((v as any)[k])
+					);
+				}) as Guard<Partial<T>>,
+				`partial<${Object.keys(shape).join(', ')}>`
+			),
+		objectHelpers
+	) as PartialFactory,
 	/**
 	 * Checks if a value is a record.
 	 * @param value The value to check.
@@ -1183,14 +1196,17 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	record: <K extends string | number | symbol, V>(keyGuard: Guard<K>, valGuard: Guard<V>): Guard<Record<K, V>> =>
-		setTypeName(
-			(v => {
-				if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-				return Object.entries(v).every(([k, val]) => keyGuard(k) && valGuard(val));
-			}) as Guard<Record<K, V>>,
-			`record<${keyGuard.meta?.name || 'unknown'}, ${valGuard.meta?.name || 'unknown'}>`
-		),
+	record: makeChainable(
+		<K extends string | number | symbol, V>(keyGuard: Guard<K>, valGuard: Guard<V>): Guard<Record<K, V>> =>
+			setTypeName(
+				(v => {
+					if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+					return Object.entries(v).every(([k, val]) => keyGuard(k) && valGuard(val));
+				}) as Guard<Record<K, V>>,
+				`record<${keyGuard.meta?.name || 'unknown'}, ${valGuard.meta?.name || 'unknown'}>`
+			),
+		objectHelpers
+	) as RecordFactory,
 	/**
 	 * Checks if a value is a tuple.
 	 * @param value The value to check.
@@ -1727,6 +1743,7 @@ export function assert<T>(value: unknown, guard: Guard<T>, message?: string): as
 			msg: message ?? guard.meta?.errorMsg ?? `Value failed type assertion`,
 			expected: guard.meta?.name ?? 'unknown',
 			path: [],
+			actual: typeof value,
 		});
 	}
 }
@@ -1772,6 +1789,7 @@ export function validate<T, E = null>(
 							`Value failed validation: expected ${guard.meta?.name}, but got ${typeof value} (${JSON.stringify(value)})`,
 						expected: guard.meta?.name || 'unknown',
 						path: [],
+						actual: typeof value,
 					})
 			) as Result<T, E extends null | undefined ? GuardErr : E>);
 }
@@ -1875,13 +1893,38 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 ): {
 	readonly [K in keyof S]: {
 		/**
-		 * Synchronously parses a value against the schema.
+		 * Recursively parses a value against the schema.
 		 * @param value The value to parse.
 		 * @returns A Result containing the parsed value or an array of `GuardErr`.
+		 *
+		 * @example
+		 * ```ts
+		 * const schemas = defineSchemas({
+		 *   User: {
+		 *     name: is.string,
+		 *     age: is.number,
+		 *     address: is.object({
+		 *       street: is.string,
+		 *       city: is.string,
+		 *       region: is.string,
+		 *     }),
+		 *   },
+		 * });
+		 *
+		 * const result = schemas.User.parse({ name: 'John', age: 30, address: { street: '123 Main St', city: 'Anytown', region: 'CA' } });
+		 * // result is typed as Result<{ name: string; age: number; address: { street: string; city: string; region: string; } }, GuardErr[]>
+		 *
+		 * // Nested objects are fully typed and errors are reported with full paths
+		 * const invalidResult = schemas.User.parse({ name: 'John', age: 30, address: { street: '123 Main St', city: 'Anytown', region: 123 } });
+		 * // msg: User.address.region failed validation: expected string, but got number (123)
+		 * // path: ['User', 'address', 'region']
+		 * // expected: 'string'
+		 * // actual: 'number'
+		 * ```
 		 */
 		parse: (value: unknown, error?: string) => Result<InferSchema<S[K]>, GuardErr[]>;
 		/**
-		 * Synchronously 'asserts' that a value matches the schema (throws `GuardErr` if not).
+		 * Recursively 'asserts' that a value matches the schema (throws `GuardErr` if not).
 		 *
 		 * We use `value is x` instead of `asserts value is x`
 		 * because `asserts` does not work with inferred types.
@@ -1892,10 +1935,60 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 		assert: (value: unknown, error?: string) => value is InferSchema<S[K]>;
 	};
 } {
-	const compiledSchemas = Object.entries(schemas).map(([schemaName, schema]) => {
-		const entries = Object.entries(schema);
-		const entryCount = entries.length;
+	/**
+	 * Recursively validates a value against a shape (guard map), collecting errors with full paths.
+	 * If a guard has `meta.shape`, it descends into the nested object instead of just failing at this level.
+	 */
+	function validateShape(
+		value: unknown,
+		shape: Record<string, Guard<any>>,
+		schemaName: string,
+		path: string[],
+		errors: GuardErr[]
+	): void {
+		if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+			errors.push(
+				GuardErrs.GuardErr({
+					msg: `${[schemaName, ...path].join('.')}: Expected an object but got ${typeof value}`,
+					schema: schemaName,
+					path: [schemaName, ...path],
+					expected: 'object',
+					actual: typeof value,
+				})
+			);
+			return;
+		}
 
+		const entries = Object.entries(shape);
+		for (let i = 0; i < entries.length; i++) {
+			const [key, guard] = entries[i]!;
+			const propertyValue = (value as any)[key];
+			const currentPath = [...path, key];
+
+			if (!guard(propertyValue)) {
+				// If this guard has a shape, recurse into it for deeper error detail
+				if (guard.meta?.['shape'] && typeof propertyValue === 'object' && propertyValue !== null) {
+					validateShape(propertyValue, guard.meta['shape'], schemaName, currentPath, errors);
+				} else {
+					const fullPath = [schemaName, ...currentPath].join('.');
+					const msg = guard.meta?.errorMsg;
+					errors.push(
+						GuardErrs.GuardErr({
+							msg: msg
+								? msg
+								: `${fullPath} failed validation: expected ${guard.meta?.name || 'unknown'}, but got ${typeof propertyValue} (${JSON.stringify(propertyValue)})`,
+							schema: schemaName,
+							path: [schemaName, ...currentPath],
+							expected: guard.meta?.name || 'unknown',
+							actual: typeof propertyValue,
+						})
+					);
+				}
+			}
+		}
+	}
+
+	const compiledSchemas = Object.entries(schemas).map(([schemaName, schema]) => {
 		return [
 			schemaName,
 			{
@@ -1907,28 +2000,12 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 								schema: schemaName,
 								path: [],
 								expected: 'object',
+								actual: typeof value,
 							}),
 						]);
 					}
 					const errors: GuardErr[] = [];
-					for (let i = 0; i < entryCount; i++) {
-						const entry = entries[i]!;
-						const [key, guard] = entry;
-						const propertyValue = (value as any)[key];
-						if (!guard(propertyValue)) {
-							const msg = guard.meta?.errorMsg;
-							errors.push(
-								GuardErrs.GuardErr({
-									msg: msg
-										? msg
-										: `${schemaName}.${key} failed validation: expected ${guard.meta?.name || 'unknown'}, but got ${typeof propertyValue} (${JSON.stringify(propertyValue)})`,
-									schema: schemaName,
-									path: [schemaName, key],
-									expected: guard.meta?.name || 'unknown',
-								})
-							);
-						}
-					}
+					validateShape(value, schema, schemaName, [], errors);
 					return errors.length === 0 ? ok(value as any) : err(errors);
 				},
 				assert: (value: unknown, errorMsg?: string) => {
@@ -1938,23 +2015,13 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 							schema: schemaName,
 							path: [],
 							expected: 'object',
+							actual: typeof value,
 						});
 					}
-					for (let i = 0; i < entryCount; i++) {
-						const entry = entries[i]!;
-						const [key, guard] = entry;
-						const propertyValue = (value as any)[key];
-						if (!guard(propertyValue)) {
-							const msg = guard.meta?.errorMsg || errorMsg;
-							throw GuardErrs.GuardErr({
-								msg: msg
-									? msg
-									: `${schemaName}.${key} failed validation: expected ${guard.meta?.name || 'unknown'}, but got ${typeof propertyValue} (${JSON.stringify(propertyValue)})`,
-								schema: schemaName,
-								path: [schemaName, key],
-								expected: guard.meta?.name || 'unknown',
-							});
-						}
+					const errors: GuardErr[] = [];
+					validateShape(value, schema, schemaName, [], errors);
+					if (errors.length > 0) {
+						throw errors[0]!;
 					}
 					return true;
 				},

@@ -87,4 +87,36 @@ describe('Guard API Improvements', () => {
 		expect(is.array.size(3)([1, 2, 4])).toBe(true);
 		expect(is.array.size(3)([1, 2])).toBe(false);
 	});
+
+	it('supports object helpers', () => {
+		const obj = { a: 1, b: 2 };
+		expect(is.object.has('a')(obj)).toBe(true);
+		expect(is.object.notHas('c')(obj)).toBe(true);
+		expect(is.object.hasAll(['a', 'b'])(obj)).toBe(true);
+		expect(is.object.hasAny(['a', 'c'])(obj)).toBe(true);
+		expect(is.object.hasNone(['c', 'd'])(obj)).toBe(true);
+		expect(is.object.hasOnly(['a', 'b'])(obj)).toBe(true);
+		expect(is.object.where(v => v.a > 0)(obj)).toBe(true);
+	});
+
+	it('supports record helpers', () => {
+		const record = { a: 1, b: 2 };
+		expect(is.record(is.string, is.number)(record)).toBe(true);
+		expect(is.record(is.string, is.number)({ a: 1, b: '2' })).toBe(false);
+		expect(is.record(is.string, is.number)({ a: 1, b: 2, c: 3 })).toBe(true);
+		expect(is.record(is.string, is.number)({ a: 1, b: 2, c: 3 })).toBe(true);
+	});
+
+	it('supports partial objects', () => {
+		const partialTest = is.partial({
+			name: is.string,
+			age: is.number,
+		});
+
+		expect(partialTest({ name: 'John', age: 25 })).toBe(true);
+		expect(partialTest({ name: 'John' })).toBe(true);
+		expect(partialTest({ age: 25 })).toBe(true);
+		expect(partialTest({})).toBe(true);
+		expect(partialTest({ name: 'John', age: 25, extra: true })).toBe(true);
+	});
 });
