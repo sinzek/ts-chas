@@ -266,6 +266,12 @@ const result = add5ThenDouble(1); // 12
 **Converting between types**
 
 ```ts
+// ResultAsync to Result
+const result = await fetchUser(1); // awaiting a ResultAsync returns a Result
+
+// Result to ResultAsync
+const resultAsync = ResultAsync.fromResult(result); // ResultAsync<T, E>
+
 // Result to Option
 const maybeData = chas.ok(5).toOption(); // Option<number>
 const safelyEmpty = chas.err('fail').toOption(); // Option::None
