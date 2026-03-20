@@ -1,7 +1,7 @@
 import { type TaggedErr, defineErrs, type InferErr } from './tagged-errs.js';
 import { type None, type Option, type OptionAsync, type Some } from './option.js';
 import { type Guard } from './guard.js';
-import type { NonVoid } from './utils.js';
+import type { CatchTag, CatchTarget, NonVoid } from './utils.js';
 /**
  * A successful result.
  *
@@ -30,17 +30,8 @@ export type Err<E> = {
 	readonly error: E;
 };
 
-/** Helper to extract the string tag from either a string or an error factory */
-export type CatchTarget = string | { is: (err: any) => err is { readonly _tag: string } };
-export type CatchTag<Target> = Target extends string
-	? Target
-	: Target extends { is: (err: any) => err is { readonly _tag: infer Tag } }
-		? Tag
-		: never;
-
 /**
  * Helper to safely extract the error type from a union of Results.
- * Bypasses TypeScript's contravariance inference bug.
  */
 export type UnwrapErr<U> = U extends { ok: false; error: infer E }
 	? E
@@ -51,14 +42,12 @@ export type UnwrapErr<U> = U extends { ok: false; error: infer E }
 		: never;
 
 /**
- * Distributes over a union to safely extract the value from an `Ok` branch,
- * bypassing contravariance inference bugs.
+ * Distributes over a union to safely extract the value from an `Ok` branch
  */
 export type ExtractOkValue<T> = T extends { ok: true; value: infer U } ? U : never;
 
 /**
- * Distributes over a union to safely extract the error from an `Err` branch,
- * bypassing contravariance inference bugs.
+ * Distributes over a union to safely extract the error from an `Err` branch
  */
 export type ExtractErrError<T> = T extends { ok: false; error: infer E } ? E : never;
 
@@ -642,6 +631,7 @@ export interface ResultMethods<T, E> {
 	 * getUser(id)
 	 *     .catchTag('NotFound', () => chas.ok(GUEST_USER));
 	 * // Result<User, DbError | Unauthorized> — NotFound is gone!
+	 * // Also works: .catchTag(Errors.NotFound, ...);
 	 * ```
 	 */
 	readonly catchTag: <Target extends CatchTarget, T2 = T, E2 = never>(

@@ -10,11 +10,10 @@ import {
 	anyAsync as resultAnyAsync,
 	collectAsync as resultCollectAsync,
 	ok,
-	type CatchTarget,
-	type CatchTag,
 } from './result.js';
 import { type TaggedErr } from './tagged-errs.js';
 import { type Option } from './option.js';
+import type { CatchTag, CatchTarget } from './utils.js';
 
 /**
  * A promise-like wrapper with chaining, mapping, error handling, and resilience logic that evaluates to a ResultAsync.
@@ -556,6 +555,13 @@ export class Task<T, E> {
 	 */
 	tapErr(fn: (error: E) => void | Promise<void>): Task<T, E> {
 		return new Task(ctx => this.run(ctx).tapErr(fn));
+	}
+
+	tapTag<Target extends CatchTarget>(
+		target: Target,
+		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => void | Promise<void>
+	): Task<T, E> {
+		return new Task(ctx => this.run(ctx).tapTag(target, handler));
 	}
 
 	/**

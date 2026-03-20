@@ -20,6 +20,14 @@ export type MaybePromise<T> = T | Promise<T>;
  */
 export type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void ? I : never;
 
+/** Helper to extract the string tag from either a string or an error factory */
+export type CatchTarget = string | { is: (err: any) => err is { readonly _tag: string } };
+export type CatchTag<Target> = Target extends string
+	? Target
+	: Target extends { is: (err: any) => err is { readonly _tag: infer Tag } }
+		? Tag
+		: never;
+
 // A utility type that checks if T exhaustively covers all members of U.
 type ExhaustiveArray<T extends readonly any[], U> = [U] extends [T[number]] ? T : [...T, Exclude<U, T[number]>];
 
