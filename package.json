@@ -86,7 +86,7 @@
         "default": "./dist/guard.cjs"
       }
     },
-    "./pipe": {
+"./pipe": {
       "import": {
         "types": "./dist/pipe.d.ts",
         "default": "./dist/pipe.js"
@@ -94,6 +94,16 @@
       "require": {
         "types": "./dist/pipe.d.cts",
         "default": "./dist/pipe.cjs"
+      }
+    },
+    "./config": {
+      "import": {
+        "types": "./dist/config.d.ts",
+        "default": "./dist/config.js"
+      },
+      "require": {
+        "types": "./dist/config.d.cts",
+        "default": "./dist/config.cjs"
       }
     }
   },
@@ -108,7 +118,7 @@
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
-    "docs": "typedoc --out docs",
+    "docs": "typedoc --out docs --plugin typedoc-plugin-coverage",
     "docs:deploy": "pnpm run docs && gh-pages -d docs",
     "docs:deploy:ci": "pnpm run docs && gh-pages -d docs -r https://x-access-token:${GITHUB_TOKEN}@github.com/sinzek/chas.git",
     "prepublishOnly": "pnpm run build"
@@ -124,6 +134,7 @@
     "prettier": "^3.8.1",
     "tsup": "^8.5.1",
     "typedoc": "^0.28.17",
+    "typedoc-plugin-coverage": "^4.0.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.0",
     "vitest": "^4.0.18"

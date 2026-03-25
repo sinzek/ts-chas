@@ -1,16 +1,14 @@
-import { type TaggedErr, defineErrs, type InferErr } from './tagged-errs.js';
+import { type TaggedErr, type InferErr, GlobalErrs } from './tagged-errs.js';
 import type { None, Option, Some } from './option.js';
 import { err, ok, ResultAsync, type Err, type Ok, type Result } from './result.js';
 import { Task } from './task.js';
 import { type UnionToIntersection, deepEqual } from './utils.js';
+import type { StandardSchemaV1 } from './standard-schema.js';
 
-const GuardErrs = defineErrs({
-	GuardErr: (props: { msg: string; path: string[]; expected: string; actual: string; schema?: string }) => props,
-});
 /**
  * The error type that is used by default when parsing a guard.
  */
-export type GuardErr = InferErr<typeof GuardErrs, 'GuardErr'>;
+export type GuardErr = InferErr<typeof GlobalErrs.GuardErr>;
 
 /**
  * A guard is a function that returns true if the value is of the specified type (or satisfies a set of conditions) and narrows the type of the value.
@@ -63,6 +61,15 @@ export type Guard<T> = ((value: unknown) => value is T) & {
  */
 export type GuardType<T> = T extends Guard<infer U> ? U : never;
 
+/**
+ * Identical to a regular Guard but its type parameter is a Brand.
+ */
+type BrandedGuard<Tag extends string, Base> = Guard<Brand<Tag, Base>> & {
+	readonly setErrMsg: (errorMsg: string) => BrandedGuard<Tag, Base>;
+	readonly setMeta: (meta: Guard<any>['meta']) => BrandedGuard<Tag, Base>;
+	readonly brand: <NewTag extends string>() => BrandedGuard<NewTag, Brand<Tag, Base>>;
+};
+
 type CommonHelpers<T> = {
 	/**
 	 * Sets a custom error message for the guard.
@@ -74,6 +81,20 @@ type CommonHelpers<T> = {
 	 * @param meta The metadata to set.
 	 */
 	readonly setMeta: (meta: Guard<any>['meta']) => T;
+	/**
+	 * Brands the guard's output type with a compile-time tag. Zero runtime cost.
+	 * The returned guard has the same runtime behavior but its type is `Brand<Tag, Base>`.
+	 *
+	 * @example
+	 * ```ts
+	 * const Email = is.string.email.brand<"Email">();
+	 * // Guard<Brand<"Email", string>>
+	 *
+	 * const result = validate(input, Email);
+	 * // Result<Brand<"Email", string>, GuardErr>
+	 * ```
+	 */
+	readonly brand: <Tag extends string>() => T extends Guard<infer Base> ? BrandedGuard<Tag, Base> : never;
 };
 
 interface StringHelpers extends CommonHelpers<ChainableStringGuard> {
@@ -590,16 +611,24 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 					};
 				}
 
+				if (prop === 'brand') {
+					return () => {
+						const nextGuard = ((v: unknown): v is any => target(v)) as any;
+						nextGuard.meta = { ...target.meta, name: `${target.meta?.name || 'unknown'}.brand` };
+						return createProxy(nextGuard, currentHelpers);
+					};
+				}
+
 				if (prop === 'strict' && target.meta?.shape) {
 					const shape = target.meta.shape;
-					const name = `${target.meta.name || 'unknown'}.strict`;
-					const nextGuard = setTypeName(
+					const newName = `${target.meta.name || 'unknown'}.strict`;
+					const nextGuard = name(
 						((v: unknown): v is any => {
 							if (!target(v)) return false;
 							if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
 							return Object.keys(v).every(key => key in shape);
 						}) as any,
-						name
+						newName
 					);
 					return createProxy(nextGuard, currentHelpers);
 				}
@@ -611,12 +640,12 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 					if (prop === 'spaces' && (target as any)._isAlphanumeric) {
 						return (...args: any[]) => {
 							const nextGuard = helper(...args);
-							const name = `${target.meta?.name || 'unknown'}.${prop}${args.length ? `(${args.join(', ')})` : ''}`;
+							const newName = `${target.meta?.name || 'unknown'}.${prop}${args.length ? `(${args.join(', ')})` : ''}`;
 							return createProxy(
-								setTypeName(
+								name(
 									((v: unknown): v is any =>
 										typeof v === 'string' && /^[a-z0-9\s]*$/i.test(v) && nextGuard(v)) as any,
-									name
+									newName
 								),
 								currentHelpers
 							);
@@ -626,19 +655,19 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 					if (prop in factoryHelpers) {
 						return (...args: any[]) => {
 							const nextGuard = helper.apply(target, args);
-							const name = `${target.meta?.name || 'unknown'}.${prop}${args.length ? `(${args.join(', ')})` : ''}`;
+							const newName = `${target.meta?.name || 'unknown'}.${prop}${args.length ? `(${args.join(', ')})` : ''}`;
 							return createProxy(
-								setTypeName(((v: unknown): v is any => target(v) && nextGuard(v)) as any, name),
+								name(((v: unknown): v is any => target(v) && nextGuard(v)) as any, newName),
 								currentHelpers
 							);
 						};
 					}
 
 					const nextHelpers = { ...currentHelpers, ...helper };
-					const name = `${target.meta?.name || 'unknown'}.${prop}`;
-					const nextGuard = setTypeName(
+					const newName = `${target.meta?.name || 'unknown'}.${prop}`;
+					const nextGuard = name(
 						((v: unknown): v is any => target(v) && (helper as Guard<any>)(v)) as any,
-						name
+						newName
 					);
 					if (prop === 'alphanumeric') nextGuard._isAlphanumeric = true;
 					return createProxy(nextGuard, nextHelpers);
@@ -653,9 +682,27 @@ function makeChainable<T, H extends Record<string, any>>(base: T, helpers: H): T
 	return createProxy(base, helpers);
 }
 
-const setTypeName = <T extends Guard<any>>(guard: T, name: string, etc?: Record<string, any>): T => {
+const name = <T extends Guard<any>>(guard: T, name: string, etc?: Record<string, any>): T => {
 	const nextGuard = ((v: unknown): v is any => guard(v)) as any;
 	nextGuard.meta = { ...guard.meta, name, ...etc };
+	nextGuard['~standard'] = {
+		version: 1,
+		vendor: 'chas',
+		validate(value: unknown): StandardSchemaV1.Result<any> {
+			if (nextGuard(value)) {
+				return { value };
+			}
+			return {
+				issues: [
+					{
+						message:
+							nextGuard.meta?.errorMsg ||
+							`Validation failed: expected ${nextGuard.meta?.name || 'unknown'}`,
+					},
+				],
+			};
+		},
+	};
 	return nextGuard;
 };
 
@@ -745,7 +792,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	string: makeChainable(setTypeName(((v: unknown) => typeof v === 'string') as Guard<string>, 'string'), {
+	string: makeChainable(name(((v: unknown) => typeof v === 'string') as Guard<string>, 'string'), {
 		nonEmpty: ((v: unknown) => typeof v === 'string' && v.trim().length > 0) as Guard<string>,
 		empty: ((v: unknown) => typeof v === 'string' && v.trim().length === 0) as Guard<string>,
 		email: ((v: unknown) => typeof v === 'string' && RGX.email.test(v)) as Guard<string>,
@@ -836,7 +883,7 @@ const implementation = {
 	 * ```
 	 */
 	number: makeChainable(
-		setTypeName(((v: unknown) => typeof v === 'number' && Number.isFinite(v)) as Guard<number>, 'number'),
+		name(((v: unknown) => typeof v === 'number' && Number.isFinite(v)) as Guard<number>, 'number'),
 		{
 			/** Checks if a value is a number and is greater than a given number. */
 			gt: (n: number): Guard<number> => ((v: unknown) => typeof v === 'number' && v > n) as Guard<number>,
@@ -880,7 +927,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	boolean: makeChainable(setTypeName(((v: unknown) => typeof v === 'boolean') as Guard<boolean>, 'boolean'), {
+	boolean: makeChainable(name(((v: unknown) => typeof v === 'boolean') as Guard<boolean>, 'boolean'), {
 		true: ((v: unknown) => v === true) as Guard<boolean>,
 		false: ((v: unknown) => v === false) as Guard<boolean>,
 		where: (predicate: (v: boolean) => boolean) =>
@@ -902,7 +949,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	symbol: setTypeName((v => typeof v === 'symbol') as Guard<symbol>, 'symbol'),
+	symbol: name((v => typeof v === 'symbol') as Guard<symbol>, 'symbol'),
 	/**
 	 * Checks if a value is a bigint.
 	 * @param value The value to check.
@@ -919,7 +966,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	bigint: setTypeName((v => typeof v === 'bigint') as Guard<bigint>, 'bigint'),
+	bigint: name((v => typeof v === 'bigint') as Guard<bigint>, 'bigint'),
 	/**
 	 * Checks if a value is undefined.
 	 * @param value The value to check.
@@ -936,7 +983,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	undefined: setTypeName((v => v === undefined) as Guard<undefined>, 'undefined'),
+	undefined: name((v => v === undefined) as Guard<undefined>, 'undefined'),
 	/**
 	 * Checks if a value is null.
 	 * @param value The value to check.
@@ -953,7 +1000,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	null: setTypeName((v => v === null) as Guard<null>, 'null'),
+	null: name((v => v === null) as Guard<null>, 'null'),
 	/**
 	 * Checks if a value is null or undefined.
 	 * @param value The value to check.
@@ -970,7 +1017,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	nil: setTypeName((v => v == null) as Guard<null | undefined>, 'nil'),
+	nil: name((v => v == null) as Guard<null | undefined>, 'nil'),
 	/**
 	 * Checks if a value is null or passes the inner guard.
 	 * @param inner The guard to check.
@@ -988,7 +1035,7 @@ const implementation = {
 	 * ```
 	 */
 	nullable: <T>(inner: Guard<T>) =>
-		setTypeName((v => v === null || inner(v)) as Guard<T | null>, `nullable<${inner.meta?.name || 'unknown'}>`),
+		name((v => v === null || inner(v)) as Guard<T | null>, `nullable<${inner.meta?.name || 'unknown'}>`),
 	/**
 	 * Checks if a value is undefined or passes the inner guard.
 	 * @param inner The guard to check.
@@ -1006,10 +1053,7 @@ const implementation = {
 	 * ```
 	 */
 	optional: <T>(inner: Guard<T>) =>
-		setTypeName(
-			(v => v === undefined || inner(v)) as Guard<T | undefined>,
-			`optional<${inner.meta?.name || 'unknown'}>`
-		),
+		name((v => v === undefined || inner(v)) as Guard<T | undefined>, `optional<${inner.meta?.name || 'unknown'}>`),
 	/**
 	 * Checks if a value is a function.
 	 * @param value The value to check.
@@ -1026,7 +1070,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	function: setTypeName((v => typeof v === 'function') as Guard<Function>, 'function'),
+	function: name((v => typeof v === 'function') as Guard<Function>, 'function'),
 
 	/**
 	 * Checks if a value is an array.
@@ -1056,7 +1100,7 @@ const implementation = {
 	 */
 	array: makeChainable(
 		(<T>(inner?: Guard<T>) =>
-			setTypeName(
+			name(
 				(v => Array.isArray(v) && (!inner || v.every(inner))) as Guard<T[]>,
 				`array<${inner?.meta?.name || 'any'}>`
 			)) as <T>(inner?: Guard<T>) => ChainableArrayGuard<T>,
@@ -1129,7 +1173,7 @@ const implementation = {
 	 */
 	object: makeChainable(
 		<T extends Record<string, any>>(shape?: { [K in keyof T]: Guard<T[K]> }) =>
-			setTypeName(
+			name(
 				(v => {
 					if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
 					if (!shape) return true;
@@ -1170,7 +1214,7 @@ const implementation = {
 	 */
 	partial: makeChainable(
 		<T extends Record<string, any>>(shape: { [K in keyof T]: Guard<T[K]> }): Guard<Partial<T>> =>
-			setTypeName(
+			name(
 				(v => {
 					if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
 					return Object.entries(shape).every(
@@ -1198,7 +1242,7 @@ const implementation = {
 	 */
 	record: makeChainable(
 		<K extends string | number | symbol, V>(keyGuard: Guard<K>, valGuard: Guard<V>): Guard<Record<K, V>> =>
-			setTypeName(
+			name(
 				(v => {
 					if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
 					return Object.entries(v).every(([k, val]) => keyGuard(k) && valGuard(val));
@@ -1223,7 +1267,7 @@ const implementation = {
 	 * ```
 	 */
 	tuple: <T extends any[]>(...guards: { [K in keyof T]: Guard<T[K]> }): Guard<T> =>
-		setTypeName(
+		name(
 			(v => {
 				if (!Array.isArray(v) || v.length !== guards.length) return false;
 				return v.every((val, idx) => (guards[idx] as any)(val));
@@ -1246,7 +1290,7 @@ const implementation = {
 	 * ```
 	 */
 	anyOf: <T extends Guard<any>[]>(...guards: T): Guard<GuardType<T[number]>> =>
-		setTypeName(
+		name(
 			(v: unknown): v is GuardType<T[number]> => guards.some(g => g(v)),
 			`anyOf<${guards.map(g => g.meta?.name || 'unknown').join(', ')}>`
 		) as any,
@@ -1269,7 +1313,7 @@ const implementation = {
 	 * ```
 	 */
 	allOf: <T extends Guard<any>[]>(...guards: T): Guard<UnionToIntersection<GuardType<T[number]>>> =>
-		setTypeName(
+		name(
 			(v: unknown): v is UnionToIntersection<GuardType<T[number]>> => guards.every(g => g(v)),
 			`allOf<${guards.map(g => g.meta?.name || 'unknown').join(', ')}>`
 		) as any,
@@ -1289,7 +1333,7 @@ const implementation = {
 	 * ```
 	 */
 	date: makeChainable(
-		setTypeName((v: unknown): v is Date => v instanceof Date && !isNaN(v.getTime()), 'date'),
+		name((v: unknown): v is Date => v instanceof Date && !isNaN(v.getTime()), 'date'),
 		{
 			before: (date: Date) => ((v: unknown) => v instanceof Date && v < date) as Guard<Date>,
 			after: (date: Date) => ((v: unknown) => v instanceof Date && v > date) as Guard<Date>,
@@ -1345,7 +1389,7 @@ const implementation = {
 	 * ```
 	 */
 	ok: <T = any>(inner?: Guard<T>): Guard<Ok<T>> =>
-		setTypeName(
+		name(
 			(v: any): v is Ok<T> => !!v && v.ok === true && (!inner || inner(v.value)),
 			`Ok<${inner?.meta?.name || 'unknown'}>`
 		),
@@ -1366,7 +1410,7 @@ const implementation = {
 	 * ```
 	 */
 	err: <E = any>(inner?: Guard<E>): Guard<Err<E>> =>
-		setTypeName(
+		name(
 			(v: any): v is Err<E> => !!v && v.ok === false && (!inner || inner(v.error)),
 			`Err<${inner?.meta?.name || 'unknown'}>`
 		),
@@ -1386,11 +1430,17 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	result: <T, E>(okG?: Guard<T>, errG?: Guard<E>): Guard<Result<T, E>> =>
-		setTypeName(
-			((v: unknown) => is.ok(okG)(v) || is.err(errG)(v)) as Guard<Result<T, E>>,
-			`Result<${okG?.meta?.name || 'never'}, ${errG?.meta?.name || 'never'}>`
-		),
+	result: makeChainable(
+		<T, E>(okG?: Guard<T>, errG?: Guard<E>): Guard<Result<T, E>> =>
+			name(
+				((v: unknown) => is.ok(okG)(v) || is.err(errG)(v)) as Guard<Result<T, E>>,
+				`Result<${okG?.meta?.name || 'never'}, ${errG?.meta?.name || 'never'}>`
+			),
+		{
+			ok: <T = any>(inner?: Guard<T>) => is.ok(inner),
+			err: <E = any>(inner?: Guard<E>) => is.err(inner),
+		}
+	),
 
 	/**
 	 * Checks if a value is a Some.
@@ -1408,7 +1458,7 @@ const implementation = {
 	 * ```
 	 */
 	some: <T = any>(inner?: Guard<T>): Guard<Some<T>> =>
-		setTypeName(
+		name(
 			(v: any): v is Some<T> => is.ok()(v) && v.value != null && (!inner || inner(v.value)),
 			`Some<${inner?.meta?.name || 'unknown'}>`
 		),
@@ -1428,7 +1478,7 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	none: (): Guard<None> => setTypeName((v: any): v is None => is.err()(v) && v.error === undefined, 'None'),
+	none: (): Guard<None> => name((v: any): v is None => is.err()(v) && v.error === undefined, 'None'),
 
 	/**
 	 * Checks if a value is an Option.
@@ -1445,11 +1495,17 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	option: <T>(inner?: Guard<T>): Guard<Option<T>> =>
-		setTypeName(
-			((v: unknown) => is.some(inner)(v) || is.none()(v)) as Guard<Option<T>>,
-			`Option<${inner?.meta?.name || 'unknown'}>`
-		),
+	option: makeChainable(
+		<T>(inner?: Guard<T>): Guard<Option<T>> =>
+			name(
+				((v: unknown) => is.some(inner)(v) || is.none()(v)) as Guard<Option<T>>,
+				`Option<${inner?.meta?.name || 'unknown'}>`
+			),
+		{
+			some: <T = any>(inner?: Guard<T>) => is.some(inner),
+			none: () => is.none(),
+		}
+	),
 
 	/**
 	 * Checks if a value is a tagged error using a tag or error factory.
@@ -1475,7 +1531,7 @@ const implementation = {
 	 * ```
 	 */
 	taggedErr: (tagOrFactory: string | ErrorFactory, inner?: Guard<any>): Guard<any> => {
-		return setTypeName(
+		return name(
 			(v: any): v is any => {
 				if (typeof tagOrFactory !== 'string' && 'is' in tagOrFactory) {
 					return tagOrFactory.is(v) && (!inner || inner(v));
@@ -1502,8 +1558,8 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	not: <T>(guard: Guard<T>): Guard<any> =>
-		setTypeName((v: unknown): v is any => !guard(v), `not (${guard.meta?.name || 'unknown'})`),
+	not: <T, U = any>(guard: Guard<T>): Guard<Exclude<U, T>> =>
+		name((v: unknown): v is Exclude<U, T> => !guard(v), `not (${guard.meta?.name || 'unknown'})`),
 
 	/**
 	 * Checks if a value matches a schema.
@@ -1536,7 +1592,7 @@ const implementation = {
 	 * ```
 	 */
 	schema: <T>(s: { safeParse?: (v: unknown) => any; parse?: (v: unknown) => any }): Guard<T> =>
-		setTypeName(
+		name(
 			(v => {
 				if (typeof s.safeParse === 'function') {
 					return !!s.safeParse(v).success;
@@ -1555,9 +1611,9 @@ const implementation = {
 		),
 
 	/**
-	 * Checks if a value is a specific literal value.
-	 * @param value The value to check.
-	 * @returns True if the value is a specific literal value, false otherwise.
+	 * Checks if a value is a literal or union of literals.
+	 * @param values The value(s) to check.
+	 * @returns True if the value is one of the provided values, false otherwise.
 	 *
 	 * @example
 	 * ```ts
@@ -1569,36 +1625,31 @@ const implementation = {
 	 * }
 	 * ```
 	 */
-	literal: <T extends string | number | boolean>(val: T): Guard<T> =>
-		setTypeName((v: unknown): v is T => v === val, `literal (${JSON.stringify(val)})`),
+	literal: <T extends readonly (string | number | boolean | bigint)[]>(...values: T): Guard<T[number]> =>
+		name(
+			(v: unknown): v is T[number] => values.includes(v as T[number]),
+			`literal (${values.map(v => JSON.stringify(v)).join(' | ')})`
+		),
 
 	/**
-	 * Checks if a value is a discriminated union.
+	 * Checks if a value is a union of types
 	 * @param value The value to check.
-	 * @returns True if the value is a discriminated union, false otherwise.
+	 * @returns True if the value is a union of literals, false otherwise.
 	 *
 	 * @example
 	 * ```ts
 	 * import { is } from 'chas/guard';
 	 *
 	 * const value: unknown = 'hello';
-	 * if (is.discUnion('hello', 'world')(value)) {
+	 * if (is.union('hello', 'world')(value)) {
 	 *   // value is now typed as 'hello' | 'world'
 	 * }
 	 * ```
 	 */
-	discUnion: <T extends object, K extends keyof T>(
-		key: K,
-		mapping: { [V in T[K] & (string | number)]: Guard<Extract<T, { [P in K]: V }>> }
-	): Guard<T> =>
-		setTypeName(
-			(v => {
-				if (typeof v !== 'object' || v === null) return false;
-				const tag = (v as any)[key];
-				const guard = (mapping as any)[tag];
-				return guard ? guard(v) : false;
-			}) as Guard<T>,
-			`discUnion(${String(key)})`
+	union: <T extends readonly Guard<unknown>[]>(...values: T): T[number] =>
+		name(
+			(v: unknown): v is T[number] => values.some(g => g(v)),
+			`union (${values.map(g => g.meta?.name || 'unknown').join(' | ')})`
 		),
 };
 
@@ -1739,8 +1790,8 @@ export const is = createIs(implementation);
  */
 export function assert<T>(value: unknown, guard: Guard<T>, message?: string): asserts value is T {
 	if (!guard(value)) {
-		throw GuardErrs.GuardErr({
-			msg: message ?? guard.meta?.errorMsg ?? `Value failed type assertion`,
+		throw GlobalErrs.GuardErr({
+			message: message ?? guard.meta?.errorMsg ?? `Value failed type assertion`,
 			expected: guard.meta?.name ?? 'unknown',
 			path: [],
 			actual: typeof value,
@@ -1783,8 +1834,8 @@ export function validate<T, E = null>(
 		? ok(value)
 		: (err(
 				error ||
-					GuardErrs.GuardErr({
-						msg:
+					GlobalErrs.GuardErr({
+						message:
 							guard.meta?.errorMsg ||
 							`Value failed validation: expected ${guard.meta?.name}, but got ${typeof value} (${JSON.stringify(value)})`,
 						expected: guard.meta?.name || 'unknown',
@@ -1916,7 +1967,7 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 		 *
 		 * // Nested objects are fully typed and errors are reported with full paths
 		 * const invalidResult = schemas.User.parse({ name: 'John', age: 30, address: { street: '123 Main St', city: 'Anytown', region: 123 } });
-		 * // msg: User.address.region failed validation: expected string, but got number (123)
+		 * // message: User.address.region failed validation: expected string, but got number (123)
 		 * // path: ['User', 'address', 'region']
 		 * // expected: 'string'
 		 * // actual: 'number'
@@ -1948,8 +1999,8 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 	): void {
 		if (typeof value !== 'object' || value === null || Array.isArray(value)) {
 			errors.push(
-				GuardErrs.GuardErr({
-					msg: `${[schemaName, ...path].join('.')}: Expected an object but got ${typeof value}`,
+				GlobalErrs.GuardErr({
+					message: `${[schemaName, ...path].join('.')}: Expected an object but got ${typeof value}`,
 					schema: schemaName,
 					path: [schemaName, ...path],
 					expected: 'object',
@@ -1971,11 +2022,11 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 					validateShape(propertyValue, guard.meta['shape'], schemaName, currentPath, errors);
 				} else {
 					const fullPath = [schemaName, ...currentPath].join('.');
-					const msg = guard.meta?.errorMsg;
+					const message = guard.meta?.errorMsg;
 					errors.push(
-						GuardErrs.GuardErr({
-							msg: msg
-								? msg
+						GlobalErrs.GuardErr({
+							message: message
+								? message
 								: `${fullPath} failed validation: expected ${guard.meta?.name || 'unknown'}, but got ${typeof propertyValue} (${JSON.stringify(propertyValue)})`,
 							schema: schemaName,
 							path: [schemaName, ...currentPath],
@@ -1989,47 +2040,96 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 	}
 
 	const compiledSchemas = Object.entries(schemas).map(([schemaName, schema]) => {
-		return [
-			schemaName,
-			{
-				parse: (value: unknown) => {
-					if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-						return err([
-							GuardErrs.GuardErr({
-								msg: `${schemaName}: Expected an object but got ${typeof value}`,
-								schema: schemaName,
-								path: [],
-								expected: 'object',
-								actual: typeof value,
-							}),
-						]);
-					}
-					const errors: GuardErr[] = [];
-					validateShape(value, schema, schemaName, [], errors);
-					return errors.length === 0 ? ok(value as any) : err(errors);
-				},
-				assert: (value: unknown, errorMsg?: string) => {
-					if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-						throw GuardErrs.GuardErr({
-							msg: errorMsg || `${schemaName}: Expected an object but got ${typeof value}`,
+		const schemaObj = {
+			parse: (value: unknown) => {
+				if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+					return err([
+						GlobalErrs.GuardErr({
+							message: `${schemaName}: Expected an object but got ${typeof value}`,
 							schema: schemaName,
 							path: [],
 							expected: 'object',
 							actual: typeof value,
-						});
+						}),
+					]);
+				}
+				const errors: GuardErr[] = [];
+				validateShape(value, schema, schemaName, [], errors);
+				return errors.length === 0 ? ok(value as any) : err(errors);
+			},
+			assert: (value: unknown, errorMsg?: string) => {
+				if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+					throw GlobalErrs.GuardErr({
+						message: errorMsg || `${schemaName}: Expected an object but got ${typeof value}`,
+						schema: schemaName,
+						path: [],
+						expected: 'object',
+						actual: typeof value,
+					});
+				}
+				const errors: GuardErr[] = [];
+				validateShape(value, schema, schemaName, [], errors);
+				if (errors.length > 0) {
+					throw errors[0]!;
+				}
+				return true;
+			},
+			'~standard': {
+				version: 1 as const,
+				vendor: 'chas',
+				validate(value: unknown): StandardSchemaV1.Result<any> {
+					const result = schemaObj.parse(value);
+					if (result.isOk()) {
+						return { value: result.value };
 					}
-					const errors: GuardErr[] = [];
-					validateShape(value, schema, schemaName, [], errors);
-					if (errors.length > 0) {
-						throw errors[0]!;
-					}
-					return true;
+					return {
+						issues: result.error.map((e: any) => ({
+							message: e.message || e.message || 'Validation failed',
+							path: e.path?.map((p: string) => ({ key: p })),
+						})),
+					};
 				},
 			},
-		];
+		};
+		return [schemaName, schemaObj];
 	});
 
 	return Object.fromEntries(compiledSchemas) as any;
+}
+
+/**
+ * Converts a Guard into a Standard Schema V1 compliant object.
+ * Useful for passing guards to frameworks that accept Standard Schema validators
+ * (e.g. tRPC, react-hook-form, Drizzle).
+ *
+ * @example
+ * ```ts
+ * import { is, toStandardSchema } from 'chas/guard';
+ *
+ * const emailSchema = toStandardSchema(is.string.email);
+ * // emailSchema satisfies StandardSchemaV1<unknown, string>
+ * ```
+ */
+export function toStandardSchema<T>(guard: Guard<T>): StandardSchemaV1<unknown, T> {
+	return {
+		'~standard': {
+			version: 1,
+			vendor: 'chas',
+			validate(value: unknown): StandardSchemaV1.Result<T> {
+				if (guard(value)) {
+					return { value };
+				}
+				return {
+					issues: [
+						{
+							message:
+								guard.meta?.errorMsg || `Validation failed: expected ${guard.meta?.name || 'unknown'}`,
+						},
+					],
+				};
+			},
+		},
+	};
 }
 
 /**
@@ -2038,9 +2138,33 @@ export function defineSchemas<S extends Record<string, Record<string, Guard<any>
 export const Guard = {
 	toValidator: guardToValidator,
 	toTask: guardToTask,
+	toStandardSchema,
 	validate,
 	assert,
 	ensure,
 	is,
 	defineSchemas,
 };
+
+/**
+ * A branded type that adds a compile-time tag to a base type.
+ * This is a phantom type w/ no runtime cost.
+ *
+ * @example
+ * ```ts
+ * type Email = Brand<"Email", string>;
+ * type UserId = Brand<"UserId", string>;
+ *
+ * // These are incompatible at compile time even though both are strings:
+ * declare function sendEmail(to: Email): void;
+ * declare const userId: UserId;
+ * sendEmail(userId); // Type error
+ * ```
+ */
+export type Brand<Tag extends string, Base> = Base & { readonly __brand: Tag };
+
+/**
+ * Creates a branded value from an already-validated value. Use with caution —
+ * prefer using branded guards for runtime validation + compile-time safety.
+ */
+export const unsafeBrand = <Tag extends string, Base>(value: Base): Brand<Tag, Base> => value as Brand<Tag, Base>;

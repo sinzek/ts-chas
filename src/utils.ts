@@ -16,6 +16,11 @@ export type Prettify<T> = {
 export type MaybePromise<T> = T | Promise<T>;
 
 /**
+ * Unwraps a promise type.
+ */
+export type UnwrapPromise<T> = T extends Promise<infer U> ? U : T;
+
+/**
  * Converts a union type to an intersection type.
  */
 export type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void ? I : never;
@@ -27,6 +32,16 @@ export type CatchTag<Target> = Target extends string
 	: Target extends { is: (err: any) => err is { readonly _tag: infer Tag } }
 		? Tag
 		: never;
+
+export type ExtractErrorFromTarget<Target extends CatchTarget, E> = [E] extends [{ readonly _tag: string }]
+	? Extract<E, { _tag: CatchTag<Target> }>
+	: Target extends { is: (err: any) => err is infer Guarded }
+		? Guarded
+		: Error & {
+				readonly _tag: CatchTag<Target>;
+				toJSON: () => Record<string, unknown>;
+				toString: () => string;
+			};
 
 // A utility type that checks if T exhaustively covers all members of U.
 type ExhaustiveArray<T extends readonly any[], U> = [U] extends [T[number]] ? T : [...T, Exclude<U, T[number]>];
@@ -40,6 +55,29 @@ export const exhaustiveArray =
 /**
  * Performs a deep equality check between two values.
  */
+/**
+ * A branded type that adds a compile-time tag to a base type.
+ * This is a phantom type w/ no runtime cost.
+ *
+ * @example
+ * ```ts
+ * type Email = Brand<"Email", string>;
+ * type UserId = Brand<"UserId", string>;
+ *
+ * // These are incompatible at compile time even though both are strings:
+ * declare function sendEmail(to: Email): void;
+ * declare const userId: UserId;
+ * sendEmail(userId); // Type error
+ * ```
+ */
+export type Brand<Tag extends string, Base> = Base & { readonly __brand: Tag };
+
+/**
+ * Creates a branded value from an already-validated value. Use with caution —
+ * prefer using branded guards for runtime validation + compile-time safety.
+ */
+export const unsafeBrand = <Tag extends string, Base>(value: Base): Brand<Tag, Base> => value as Brand<Tag, Base>;
+
 export function deepEqual(a: any, b: any): boolean {
 	if (a === b) return true;
 

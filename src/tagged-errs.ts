@@ -16,10 +16,7 @@ export type TaggedErr = Error & {
 /** Maps tag names to factory functions that produce the error data (without the `_tag` field). */
 type ErrorDefinitions = Record<string, (...args: any[]) => object>;
 
-/** Helper type to infer the exact union of errors produced by an ErrorDefinitions object */
-type InferErrorsFromDef<T extends ErrorDefinitions, B extends Record<string, unknown> = {}> = {
-	[K in keyof T & string]: Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>;
-}[keyof T & string];
+
 
 /**
  * Type that represents the factory functions for a set of tagged error definitions.
@@ -38,7 +35,9 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
 		 * // result is Result<never, NotFoundErr>
 		 * ```
 		 */
-		err: <Val = never>(...args: Parameters<T[K]>) => Result<Val, InferErrorsFromDef<T, B>>;
+		err: <Val = never>(
+			...args: Parameters<T[K]>
+		) => Result<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>>;
 		/**
 		 * Creates a ResultAsync with an Err variant of this error type. Useful for returning an Err variant of this error type from a function that returns a ResultAsync.
 		 * @param args The arguments to pass to the error factory function.
@@ -50,7 +49,9 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
 		 * // result is ResultAsync<never, NotFoundErr>
 		 * ```
 		 */
-		errAsync: <Val = never>(...args: Parameters<T[K]>) => ResultAsync<Val, InferErrorsFromDef<T, B>>;
+		errAsync: <Val = never>(
+			...args: Parameters<T[K]>
+		) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>>;
 		/**
 		 * Checks if an error is an instance of this error type.
 		 * @param err The error to check.
@@ -131,19 +132,15 @@ export type InferErrs<T extends ErrorFactories<any, any>> = {
 }[keyof T & string];
 
 /**
- * Extracts a single error variant from an `ErrorFactories` object by its tag.
+ * Extracts a single error variant from an error factory.
  *
  * @example
  * ```ts
  * const AppError = chas.defineErrs({ NotFound: () => ({}) });
- * type NotFound = chas.InferErr<typeof AppError, "NotFound">;
+ * type NotFound = chas.InferErr<typeof AppError.NotFound>;
  * ```
  */
-export type InferErr<T extends ErrorFactories<any, any>, Tag extends keyof T & string> = T[Tag] extends (
-	...args: any[]
-) => infer R
-	? R
-	: never;
+export type InferErr<T extends (...args: any[]) => any> = ReturnType<T>;
 
 /**
  * Extracts a specific error variant from a TaggedErr union.
@@ -241,7 +238,7 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 				},
 			});
 
-			return errInstance as unknown as TaggedErr;
+			return errInstance as TaggedErr;
 		};
 
 		factory.err = (...args: unknown[]) => {
@@ -428,6 +425,11 @@ export const isAnyErrWithTag = <E extends TaggedErr, Tag extends E['_tag']>(
 	return tags.includes(error._tag as Tag);
 };
 
+export const GlobalErrs = defineErrs({
+	GuardErr: (props: { message: string; path: string[]; expected: string; actual: string; schema?: string }) => props,
+	ChasErr: (props: { message: string; origin: string; cause?: unknown }) => props,
+});
+
 /**
  * Also a namespace for Tagged Error utilities, merges with the `TaggedErr` type definition.
  */
@@ -439,4 +441,5 @@ export const TaggedErrs = {
 	matchPartialAsync: matchErrPartialAsync,
 	is: isErrWithTag,
 	isAny: isAnyErrWithTag,
+	global: GlobalErrs,
 };

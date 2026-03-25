@@ -9,6 +9,7 @@ export default defineConfig({
 		'src/tagged-errs.ts',
 		'src/guard.ts',
 		'src/pipe.ts',
+		'src/config.ts',
 	],
 	format: ['esm', 'cjs'],
 	target: 'es2022',

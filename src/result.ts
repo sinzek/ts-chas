@@ -1,7 +1,7 @@
-import { type TaggedErr, defineErrs, type InferErr } from './tagged-errs.js';
-import { type None, type Option, type OptionAsync, type Some } from './option.js';
 import { type Guard } from './guard.js';
-import type { CatchTag, CatchTarget, NonVoid } from './utils.js';
+import { type None, type Option, type OptionAsync, type Some } from './option.js';
+import { GlobalErrs, type InferErr, type TaggedErr } from './tagged-errs.js';
+import type { CatchTag, CatchTarget, ExtractErrorFromTarget, NonVoid } from './utils.js';
 /**
  * A successful result.
  *
@@ -51,18 +51,21 @@ export type ExtractOkValue<T> = T extends { ok: true; value: infer U } ? U : nev
  */
 export type ExtractErrError<T> = T extends { ok: false; error: infer E } ? E : never;
 
-const _errsDef = {
-	ChasErr: (message: string, origin: string, cause?: unknown) => ({ message, origin, cause }),
-};
-let _errs: ReturnType<typeof defineErrs<typeof _errsDef>> | null = null;
-const errs = new Proxy({} as ReturnType<typeof defineErrs<typeof _errsDef>>, {
-	get(_, prop) {
-		if (!_errs) _errs = defineErrs(_errsDef);
-		return (_errs as any)[prop];
-	},
-});
+export type ChasErr = InferErr<typeof GlobalErrs.ChasErr>;
 
-export type ChasErr = InferErr<typeof errs, 'ChasErr'>;
+function isResult(val: unknown): val is Result<any, any> {
+	return (
+		val !== null &&
+		typeof val === 'object' &&
+		'ok' in val &&
+		typeof (val as any).isOk === 'function' &&
+		typeof (val as any).isErr === 'function'
+	);
+}
+
+function isPromise(val: unknown): val is PromiseLike<any> {
+	return val !== null && typeof val === 'object' && typeof (val as any).then === 'function';
+}
 
 export interface ResultMethods<T, E> {
 	/**
@@ -636,8 +639,8 @@ export interface ResultMethods<T, E> {
 	 */
 	readonly catchTag: <Target extends CatchTarget, T2 = T, E2 = never>(
 		target: Target,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => Result<T2, E2>
-	) => Result<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2>;
+		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => Result<T2, E2>
+	) => Result<T | T2, Exclude<E, { _tag: CatchTag<Target> }> | E2>;
 	/**
 	 * Taps into a specific tagged error variant by its `_tag`. The original result is returned unchanged.
 	 *
@@ -654,7 +657,7 @@ export interface ResultMethods<T, E> {
 	 */
 	readonly tapTag: <Target extends CatchTarget>(
 		target: Target,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => void
+		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => void
 	) => Result<T, E>;
 
 	[Symbol.iterator](): Generator<Result<T, E>, T, any>;
@@ -712,6 +715,32 @@ export interface ResultMethods<T, E> {
 	 * ```
 	 */
 	readonly toOption: () => Option<T>;
+
+	/**
+	 * Attaches context information to the error if this Result is an Err.
+	 * Context is stored as a `_context` array on the error, with the most recent
+	 * context first. This is useful for debugging which step in a chain failed.
+	 *
+	 * @param ctx A string description or metadata object describing the current step.
+	 * @returns The same Result with context attached to the error (if Err).
+	 *
+	 * @example
+	 * ```ts
+	 * const result = await fetchUser(id)
+	 *   .context("fetching user profile")
+	 *   .andThen(u => validatePermissions(u))
+	 *   .context("checking permissions")
+	 *   .andThen(u => loadDashboard(u))
+	 *   .context({ step: "loading dashboard", userId: id });
+	 *
+	 * // On error, context is available:
+	 * if (result.isErr()) {
+	 *   console.log(result.error._context);
+	 *   // [{ step: "loading dashboard", userId: "123" }, "checking permissions", "fetching user profile"]
+	 * }
+	 * ```
+	 */
+	readonly context: (ctx: string | Record<string, unknown>) => Result<T, E>;
 
 	/**
 	 * Transforms a `Result<T, E>` into a `Result<T, F>` by providing a new error value.
@@ -819,7 +848,7 @@ export type Result<T, E> = (Ok<T> & ResultMethods<T, E>) | (Err<E> & ResultMetho
  *
  * @example
  * ```ts
- * const res = chas.ResultAsync.fromSafePromise(Promise.resolve(42));
+ * const res = ResultAsync.fromSafePromise(Promise.resolve(42));
  * ```
  */
 export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
@@ -863,8 +892,56 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 		return new ResultAsync<T, E>(Promise.resolve().then(() => fn()));
 	}
 
+	/**
+	 * Creates a `ResultAsync` from an already resolved `Result`.
+	 * This is useful for lifting synchronous `Result` values into the asynchronous context of `ResultAsync`.
+	 * @param result A `Result` to wrap in a `ResultAsync`.
+	 * @returns A `ResultAsync` that resolves to the provided `Result`.
+	 *
+	 * @example
+	 * ```ts
+	 * const res = chas.ResultAsync.fromResult(chas.ok(42));
+	 * const val = await res; // Ok(42)
+	 * ```
+	 */
 	static fromResult<T, E>(result: Result<T, E>): ResultAsync<T, E> {
 		return new ResultAsync<T, E>(Promise.resolve(result));
+	}
+
+	/**
+	 * Creates a `ResultAsync` from a value that may be a `Result`, a `Promise`, or a plain value.
+	 */
+	static from<T, E>(val: () => Result<T, E> | PromiseLike<Result<T, E>>): ResultAsync<T, E>;
+	static from<T, E = unknown>(
+		val: () => T | PromiseLike<T>,
+		onThrow?: (error: unknown) => E | PromiseLike<E>
+	): ResultAsync<T, E>;
+	static from<T, E>(val: PromiseLike<Result<T, E>>): ResultAsync<T, E>;
+	static from<T>(val: PromiseLike<T>): ResultAsync<T, unknown>;
+	static from<T, E>(val: Result<T, E>): ResultAsync<T, E>;
+	static from<T>(val: T): [unknown] extends [T] ? ResultAsync<unknown, unknown> : ResultAsync<T, never>;
+	static from(val: any, onThrow?: (error: unknown) => any): ResultAsync<any, any> {
+		let resolved = val;
+
+		if (typeof val === 'function') {
+			try {
+				resolved = val();
+			} catch (e) {
+				resolved = err(onThrow ? onThrow(e) : e);
+			}
+		}
+
+		if (isPromise(resolved)) {
+			return new ResultAsync(
+				(resolved as Promise<any>).then(v => (isResult(v) ? v : ok(v))).catch(e => err(e))
+			) as ResultAsync<any, any>;
+		}
+
+		if (isResult(resolved)) {
+			return ResultAsync.fromResult(resolved);
+		}
+
+		return new ResultAsync(Promise.resolve(ok(resolved)));
 	}
 
 	constructor(promise: Promise<Result<T, E>>) {
@@ -1228,33 +1305,32 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	catchTag<Target extends CatchTarget, T2 = T, E2 = never>(
 		target: Target,
 		handler: (
-			error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any
+			error: NoInfer<ExtractErrorFromTarget<Target, E>>
 		) => Result<T2, E2> | ResultAsync<T2, E2> | PromiseLike<Result<T2, E2>>
-	): ResultAsync<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2> {
+	): ResultAsync<T | T2, Exclude<E, { _tag: CatchTag<Target> }> | E2> {
 		return new ResultAsync(
 			this._promise.then(res => res.catchTag<Target, T2, E2>(target, handler as any))
-		) as ResultAsync<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2>;
+		) as ResultAsync<T | T2, Exclude<E, { _tag: CatchTag<Target> }> | E2>;
 	}
 
 	/**
-	 * Taps into a specific tagged error variant by its `_tag`. The original result is returned unchanged.
+	 * Taps into a specific tagged error variant. The original result is returned unchanged.
 	 *
-	 * @param target The `_tag` value or error factory to tap.
+	 * @param target The error factory or `_tag` value to tap.
 	 * @param handler A function that receives the caught error.
 	 * @returns The original `Result` unmodified.
 	 *
 	 * @example
 	 * ```ts
 	 * getUser(id)
-	 *     .tapTag('NotFound', () => console.log('User not found'));
-	 * // Result<User, DbError | Unauthorized | NotFound>
+	 *     .tapTag(AppErr.NotFound, (e) => console.log('Not found: ', e.resource));
+	 * //                           ^^^ `e` is correctly inferred only if an error factory is provided.
+	 * //                               If a string is provided, the error will be typed as `{ _tag: string } & Error`.
 	 * ```
 	 */
 	tapTag<Target extends CatchTarget>(
 		target: Target,
-		handler: (
-			error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any
-		) => void | PromiseLike<void>
+		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => void | PromiseLike<void>
 	): ResultAsync<T, E> {
 		return new ResultAsync(this._promise.then(res => res.tapTag(target, handler)));
 	}
@@ -1333,6 +1409,13 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 				return res;
 			})
 		);
+	}
+
+	/**
+	 * Attaches context information to the error if the eventual Result is an Err.
+	 */
+	context(ctx: string | Record<string, unknown>): ResultAsync<T, E> {
+		return new ResultAsync(this._promise.then(res => res.context(ctx)));
 	}
 
 	/**
@@ -1516,7 +1599,7 @@ const ResultMethodsProto = {
 	unwrapErr<T, E, V extends Error>(this: Result<T, E>, error?: V): E {
 		if (!this.ok) return this.error;
 		if (error) throw error;
-		throw errs.ChasErr('Called unwrapErr on an Ok', 'Result.unwrapErr', this);
+		throw GlobalErrs.ChasErr({ message: 'Called unwrapErr on an Ok', origin: 'Result.unwrapErr', cause: this });
 	},
 	unwrapOr<T, E, T2 = T>(this: Result<T, E>, defaultValue: T2): T | T2 {
 		return this.ok ? this.value : defaultValue;
@@ -1533,12 +1616,12 @@ const ResultMethodsProto = {
 	expect<T, E, V extends Error>(this: Result<T, E>, message: string, error?: V): T | never {
 		if (this.ok) return this.value;
 		if (error) throw error;
-		throw errs.ChasErr(message, 'Result.expect', this);
+		throw GlobalErrs.ChasErr({ message, origin: 'Result.expect', cause: this });
 	},
 	expectErr<T, E, V extends Error>(this: Result<T, E>, message: string, error?: V): E | never {
 		if (!this.ok) return this.error;
 		if (error) throw error;
-		throw errs.ChasErr(message, 'Result.expectErr', this);
+		throw GlobalErrs.ChasErr({ message, origin: 'Result.expectErr', cause: this });
 	},
 	match<T, E, U, F>(this: Result<T, E>, fns: { ok: (value: T) => U; err: (error: E) => F }): U | F {
 		return this.ok ? fns.ok(this.value) : fns.err(this.error);
@@ -1612,8 +1695,8 @@ const ResultMethodsProto = {
 	catchTag<T, E, Target extends CatchTarget, T2 = T, E2 = never>(
 		this: Result<T, E>,
 		target: Target,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => Result<T2, E2>
-	): Result<T | T2, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2> {
+		handler: (error: ExtractErrorFromTarget<Target, NoInfer<E>>) => Result<T2, E2>
+	): Result<T | T2, Exclude<E, { _tag: CatchTag<Target> }> | E2> {
 		if (this.ok) return this as any;
 		const error = this.error;
 		if (typeof target === 'string') {
@@ -1635,9 +1718,7 @@ const ResultMethodsProto = {
 	tapTag<T, E, Target extends CatchTarget>(
 		this: Result<T, E>,
 		target: Target,
-		handler: (
-			error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any
-		) => void | PromiseLike<void>
+		handler: (error: ExtractErrorFromTarget<Target, NoInfer<E>>) => void | PromiseLike<void>
 	): Result<T, E> {
 		if (this.ok) return this;
 		const error = this.error;
@@ -1673,6 +1754,15 @@ const ResultMethodsProto = {
 			console.log(
 				`${label ?? 'Result'}: [${ok ? 'Ok' : 'Err'}]: ${ok ? JSON.stringify(this.value) : JSON.stringify(this.error)}`
 			);
+		}
+		return this;
+	},
+	context<T, E>(this: Result<T, E>, ctx: string | Record<string, unknown>): Result<T, E> {
+		if (this.ok) return this;
+		const error = this.error;
+		if (error !== null && typeof error === 'object') {
+			const e = error as any;
+			e._context = [ctx, ...(e._context ?? [])];
 		}
 		return this;
 	},
@@ -2059,7 +2149,11 @@ export function race(results: Iterable<Result<any, any>>): Result<any, any> {
 	for (const result of results) {
 		return result;
 	}
-	throw errs.ChasErr('chas.race was called with an empty iterable', 'chas.race', results);
+	throw GlobalErrs.ChasErr({
+		message: 'chas.race was called with an empty iterable',
+		origin: 'chas.race',
+		cause: results,
+	});
 }
 
 /**
@@ -2273,11 +2367,11 @@ export const partitionAsync = async <T, E>(
  */
 export const reattachResultMethods = <T, E>(parsedJson: unknown): Result<T, E> => {
 	if (!parsedJson || typeof parsedJson !== 'object' || !('ok' in parsedJson) || typeof parsedJson.ok !== 'boolean') {
-		throw errs.ChasErr(
-			'Invalid Result object in chas.revive, got ' + JSON.stringify(parsedJson),
-			'chas.revive',
-			parsedJson
-		);
+		throw GlobalErrs.ChasErr({
+			message: 'Invalid Result object in chas.revive, got ' + JSON.stringify(parsedJson),
+			origin: 'chas.revive',
+			cause: parsedJson,
+		});
 	}
 
 	const result = Object.create(ResultMethodsProto);
@@ -2350,7 +2444,13 @@ export const withRetryAsync = <Args extends unknown[], T, E>(
 				if (e && e._isChasTimeout) {
 					const timeoutError = options.onTimeout
 						? options.onTimeout()
-						: options.onThrow(errs.ChasErr('Operation timed out', 'withRetryAsync', e));
+						: options.onThrow(
+								GlobalErrs.ChasErr({
+									message: 'Operation timed out',
+									origin: 'withRetryAsync',
+									cause: e,
+								})
+							);
 					return err<E, T>(timeoutError);
 				}
 
@@ -2462,34 +2562,44 @@ export const shapeAsync = <TRec extends Record<string, ResultAsync<any, any> | P
 };
 
 /**
- * Wraps a function that returns a `Promise<Result<T, E>>` in a `ResultAsync<T, E>`, allowing for easy creation of `ResultAsync`-returning functions.
+ * Wraps an async function that returns a `Result<T, E>`, a `Promise<T>`, or a plain value `T` in a `ResultAsync<T, E>`.
+ * If the function returns a `Result`, it is used as is.
+ * If the function returns a plain value or a Promise of a plain value, it is automatically wrapped in `ok()`.
+ * If the function throws or the Promise rejects, it is caught and wrapped in `err()`.
  *
- * @param fn Async function that returns a `Result` (most commonly with `ok()` or `err()`).
+ * @param fn Function that returns a `Result`, a `Promise`, or a plain value.
  * @param onThrow Optional function to map thrown exceptions or rejections to an error type `E`.
- * @returns `ResultAsync` that returns the same result as the input function.
+ * @returns A new function that returns `ResultAsync<T, E>`.
  *
  * @example
  * ```ts
+ * // Handling Ok/Err returns
  * const fetchUser = asyncFn(async (id: number) => {
- *     const res = await fetch(`https://jsonplaceholder.typicode.com/users/${id}`);
+ *     const res = await fetch(`/users/${id}`);
  *     if (!res.ok) return err('NOT_FOUND');
  *     return ok(await res.json());
- * }); // Returns ResultAsync<User, string>
+ * });
  *
- * const fetchUserWithCatch = asyncFn(async (id: number) => {
- *     const res = await fetch(`https://jsonplaceholder.typicode.com/users/${id}`);
- *     if (!res.ok) throw 'NOT_FOUND';
- *     return ok(await res.json());
- * }, (error) => error as string); // Returns ResultAsync<User, string>
+ * // Automatically wrapping Promise<T>
+ * const getUserName = asyncFn(async (id: number) => {
+ *     const user = await db.users.find(id);
+ *     return user.name; // Automatically wrapped in ok()
+ * });
+ *
+ * // Catching throws
+ * // To reclaim the error type, you'll need to cast w/ onThrow, but at least you know it's safe!
+ * const riskyOp = asyncFn(async () => {
+ *     if (Math.random() > 0.5) throw new Error('Boom');
+ *     return 'Success';
+ * }, (error) => (error as Error).message);
  * ```
  */
-export const asyncFn = <Args extends unknown[], T, E>(
-	fn: (...args: Args) => Promise<Result<T, E>>,
+export const asyncFn = <Args extends unknown[], T, E = unknown>(
+	fn: (...args: Args) => T | Result<T, E> | PromiseLike<T | Result<T, E>>,
 	onThrow?: (error: unknown) => E
-) => {
+): ((...args: Args) => ResultAsync<T, E>) => {
 	return (...args: Args): ResultAsync<T, E> => {
-		const promise = fn(...args).catch(error => err(onThrow ? onThrow(error) : (error as E)));
-		return new ResultAsync(promise as Promise<Result<T, E>>);
+		return ResultAsync.from(() => fn(...args), onThrow) as ResultAsync<T, E>;
 	};
 };
 

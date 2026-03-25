@@ -821,7 +821,7 @@ describe('chas', () => {
 			Unauthorized: () => ({}),
 		});
 
-		type TestError = chas.InferErrs<typeof TestError>;
+		type TestErrorType = chas.InferErrs<typeof TestError>;
 
 		it('errors() creates tagged error objects', () => {
 			const e1 = TestError.NotFound('user', '123');
@@ -839,13 +839,15 @@ describe('chas', () => {
 		});
 
 		it('errors() works with Result', () => {
-			const result: chas.Result<string, TestError> = chas.err(TestError.NotFound('user', '123') as TestError);
+			const result: chas.Result<string, TestErrorType> = chas.err(
+				TestError.NotFound('user', '123') as TestErrorType
+			);
 			expect(result.isErr()).toBe(true);
 			expect(result.unwrapErr()._tag).toBe('NotFound');
 		});
 
 		it('matchError() exhaustively matches tags', () => {
-			const err1 = TestError.NotFound('user', '123') as TestError;
+			const err1 = TestError.NotFound('user', '123') as TestErrorType;
 			const message1 = chas.matchErr(err1, {
 				NotFound: e => `${e.resource} ${e.id} not found`,
 				Validation: e => `${e.field}: ${e.message}`,
@@ -853,7 +855,7 @@ describe('chas', () => {
 			});
 			expect(message1).toBe('user 123 not found');
 
-			const err2 = TestError.Validation('email', 'invalid') as TestError;
+			const err2 = TestError.Validation('email', 'invalid') as TestErrorType;
 			const message2 = chas.matchErr(err2, {
 				NotFound: e => `${e.resource} not found`,
 				Validation: e => `${e.field}: ${e.message}`,
@@ -863,7 +865,7 @@ describe('chas', () => {
 		});
 
 		it('isErrorTag() narrows the type', () => {
-			const err = TestError.NotFound('user', '123') as TestError;
+			const err = TestError.NotFound('user', '123') as TestErrorType;
 
 			if (chas.isErrWithTag(err, 'NotFound')) {
 				expect(err.resource).toBe('user');
@@ -872,16 +874,16 @@ describe('chas', () => {
 				expect.fail('Should have matched NotFound');
 			}
 
-			const validationErr = TestError.Validation('email', 'bad') as TestError;
+			const validationErr = TestError.Validation('email', 'bad') as TestErrorType;
 			expect(chas.isErrWithTag(validationErr, 'NotFound')).toBe(false);
 			expect(chas.isErrWithTag(validationErr, 'Unauthorized')).toBe(false);
 			expect(chas.isErrWithTag(validationErr, 'Validation')).toBe(true);
 		});
 
 		it('integrates with Result.match', () => {
-			function getUser(id: string): chas.Result<string, TestError> {
-				if (!id) return chas.err(TestError.Validation('id', 'required') as TestError);
-				if (id === 'missing') return chas.err(TestError.NotFound('user', id) as TestError);
+			function getUser(id: string): chas.Result<string, TestErrorType> {
+				if (!id) return chas.err(TestError.Validation('id', 'required') as TestErrorType);
+				if (id === 'missing') return chas.err(TestError.NotFound('user', id) as TestErrorType);
 				return chas.ok(`User ${id}`);
 			}
 
@@ -909,14 +911,14 @@ describe('chas', () => {
 		});
 
 		it('matchErrorPartial() matches subset with wildcard', () => {
-			const err = TestError.NotFound('user', '123') as TestError;
+			const err = TestError.NotFound('user', '123') as TestErrorType;
 			const msg = chas.matchErrPartial(err, {
 				Validation: e => `Bad ${e.field}`,
 				_: e => `Fallback: ${e._tag}`,
 			});
 			expect(msg).toBe('Fallback: NotFound');
 
-			const msg2 = chas.matchErrPartial(TestError.Validation('f', 'm') as TestError, {
+			const msg2 = chas.matchErrPartial(TestError.Validation('f', 'm') as TestErrorType, {
 				Validation: e => `Bad ${e.field}`,
 				_: () => 'fallback',
 			});
@@ -924,8 +926,8 @@ describe('chas', () => {
 		});
 
 		it('catchTag() peels off a specific error', () => {
-			const err = TestError.NotFound('user', '123') as TestError;
-			const res: chas.Result<string, TestError> = chas.err(err);
+			const err = TestError.NotFound('user', '123') as TestErrorType;
+			const res: chas.Result<string, TestErrorType> = chas.err(err);
 
 			const caught = res.catchTag('NotFound', e => {
 				expect(e.resource).toBe('user');
@@ -934,7 +936,7 @@ describe('chas', () => {
 
 			type RemainingErrors = chas.ExtractErrError<typeof caught>;
 			// Check if NotFound is strictly gone from the type
-			const _typeCheck: Exclude<TestError, { _tag: 'NotFound' }> = {} as RemainingErrors;
+			const _typeCheck: Exclude<TestErrorType, { _tag: 'NotFound' }> = {} as RemainingErrors;
 			expect(_typeCheck).toBeDefined();
 
 			// @ts-expect-error - NotFound should be excluded from the union now
@@ -945,14 +947,16 @@ describe('chas', () => {
 			expect(caught.unwrap()).toBe('recovered');
 
 			// Unmatched tags pass through
-			const res2: chas.Result<string, TestError> = chas.err(TestError.Validation('f', 'm') as TestError);
+			const res2: chas.Result<string, TestErrorType> = chas.err(TestError.Validation('f', 'm') as TestErrorType);
 			const missed = res2.catchTag('NotFound', () => chas.ok('nope'));
 			expect(missed.isErr()).toBe(true);
 			expect(missed.unwrapErr()._tag).toBe('Validation');
 		});
 
 		it('ResultAsync.catchTag() works asynchronously', async () => {
-			const res: chas.ResultAsync<string, TestError> = chas.errAsync(TestError.NotFound('u', 'i') as TestError);
+			const res: chas.ResultAsync<string, TestErrorType> = chas.errAsync(
+				TestError.NotFound('u', 'i') as TestErrorType
+			);
 			const caught = await res.catchTag('NotFound', async e => {
 				await new Promise(resolve => setTimeout(resolve, 0));
 				return chas.ok(`recovered ${e.id}`);
@@ -960,6 +964,30 @@ describe('chas', () => {
 
 			expect(caught.isOk()).toBe(true);
 			expect(caught.unwrap()).toBe('recovered i');
+		});
+
+		it('infers exact error type from factory even when Result error is unknown', () => {
+			// This matches user's request: "Ensure inferred error types have all of their custom props... e.g NotFoundErr might have a 'resource' prop"
+			const res = chas.err(TestError.NotFound('book', '10')) as chas.Result<string, unknown>;
+
+			const recovered = res.catchTag(TestError.NotFound, e => {
+				// e should be strongly typed here as the exact NotFound error!
+				expect(e.resource).toBe('book'); // Properly typed custom prop!
+				expect(e.id).toBe('10');
+				return chas.ok('found');
+			});
+
+			expect(recovered.isOk()).toBe(true);
+			expect(recovered.unwrap()).toBe('found');
+			
+			// A string tag should just infer `{ readonly _tag: 'NotFound' }` and native Error props.
+			const res2 = chas.err(TestError.NotFound('book', '10')) as chas.Result<string, unknown>;
+			res2.catchTag('NotFound', e => {
+				// @ts-expect-error - string tag only infers the tag itself, not custom props
+				void e.resource; 
+				expect(e._tag).toBe('NotFound');
+				return chas.ok(1);
+			});
 		});
 
 		it('errors() produces real Error instances with stack traces', () => {

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { is, guardToValidator, Result } from '../src/index.js';
+import { is, guardToValidator, Result, ResultAsync } from '../src/index.js';
 
 const password = 'Hello world!';
 
@@ -73,7 +73,7 @@ const validatePassword3 = guardToValidator(
 
 const result3 = validatePassword3(password); // Result<string, string>
 if (!result3.ok) {
-	console.error(result3.error.msg);
+	console.error(result3.error.message);
 }
 // password now has min 1 uppercase, 6 lowercase, min 1 symbol, and min 1 number
 
@@ -106,4 +106,50 @@ if (myIs.app.validUser(data)) {
 
 if (is.record(is.string, is.string).hasOnly(['a', 'b'])(data)) {
 	console.log(data.a);
+}
+
+const val = ResultAsync.from(3);
+
+const val2 = ResultAsync.from(Promise.resolve(3));
+
+const val3 = ResultAsync.from(Result.ok(3));
+
+const val4 = ResultAsync.from(Promise.resolve(Result.ok(3)));
+
+const val5 = ResultAsync.from(() => 3);
+
+const val6 = ResultAsync.from(() => Promise.resolve(3));
+
+const val7 = ResultAsync.from(() => Result.ok(3));
+
+const val8 = ResultAsync.from(() => Promise.resolve(Result.ok(3)));
+
+const val9 = ResultAsync.from(
+	() => 3,
+	e => e as string
+);
+
+const val10 = ResultAsync.from(
+	() => Promise.resolve(3),
+	e => e as string
+);
+
+const val11 = ResultAsync.from(() => Result.ok(5));
+
+const val12 = ResultAsync.from(() => Promise.resolve(Result.ok(5)));
+
+const val13 = is.result.ok(is.number)(Result.ok(5));
+
+const val14 = is.result.err(is.string)(Result.err('hello'));
+
+const val15 = is.not(is.string)(123);
+
+const unknownVal: unknown = 'hello';
+
+if (is.literal(3, 4, 5, 2n, 'hello', true)(unknownVal)) {
+	console.log(unknownVal);
+}
+
+if (is.union(is.string, is.number)(unknownVal)) {
+	console.log(unknownVal);
 }

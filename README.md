@@ -195,7 +195,7 @@ Define discriminated unions of native `Error` instances, allowing exhaustive pat
 ```ts
 import { chas } from 'chas';
 
-const AppError = chas.errors({
+const AppError = chas.defineErrs({
 	NotFound: (resource: string) => ({ resource }),
 	Unauthorized: () => ({}),
 });

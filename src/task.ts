@@ -11,9 +11,9 @@ import {
 	collectAsync as resultCollectAsync,
 	ok,
 } from './result.js';
-import { type TaggedErr } from './tagged-errs.js';
+
 import { type Option } from './option.js';
-import type { CatchTag, CatchTarget } from './utils.js';
+import type { CatchTag, CatchTarget, ExtractErrorFromTarget } from './utils.js';
 
 /**
  * A promise-like wrapper with chaining, mapping, error handling, and resilience logic that evaluates to a ResultAsync.
@@ -345,6 +345,18 @@ export class Task<T, E> {
 	}
 
 	/**
+	 * Attaches context information to the error if the eventual Result is an Err.
+	 * Context is stored as a `_context` array on the error, with the most recent
+	 * context first. This is useful for debugging which step in a chain failed.
+	 *
+	 * @param ctx A string description or metadata object describing the current step.
+	 * @returns A new Task with context attached to the error (if Err).
+	 */
+	context(ctx: string | Record<string, unknown>): Task<T, E> {
+		return new Task(ctx2 => this.run(ctx2).context(ctx));
+	}
+
+	/**
 	 * Retries the task up to N times if it fails, optionally with exponential backoff.
 	 *
 	 * @param count Maximum number of retries.
@@ -520,8 +532,8 @@ export class Task<T, E> {
 	 */
 	catchTag<Target extends CatchTarget, E2 = never>(
 		target: Target,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => Task<T, E2>
-	): Task<T, [E] extends [TaggedErr] ? Exclude<E, { _tag: CatchTag<Target> }> | E2 : E | E2> {
+		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => Task<T, E2>
+	): Task<T, Exclude<E, { _tag: CatchTag<Target> }> | E2> {
 		return new Task(ctx => this.run(ctx).catchTag(target as any, e => handler(e as any).run(ctx) as any) as any);
 	}
 
@@ -559,7 +571,7 @@ export class Task<T, E> {
 
 	tapTag<Target extends CatchTarget>(
 		target: Target,
-		handler: (error: [E] extends [TaggedErr] ? Extract<E, { _tag: CatchTag<Target> }> : any) => void | Promise<void>
+		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => void | Promise<void>
 	): Task<T, E> {
 		return new Task(ctx => this.run(ctx).tapTag(target, handler));
 	}
