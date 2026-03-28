@@ -20,6 +20,18 @@ import { LiteralGuardFactory } from './misc/literal.js';
 import { UnionGuardFactory } from './misc/union.js';
 import { IntersectionGuardFactory } from './misc/intersection.js';
 import { EnumGuardFactory } from './misc/enum.js';
+import { ResultGuardFactory } from './misc/result.js';
+import { OptionGuard } from './misc/option.js';
+
+// Re-export schema utilities
+export { defineSchemas, defineSchema, formatErrors, flattenErrors, AggregateGuardError } from './schema.js';
+export type { Schema, InferSchema } from './schema.js';
+
+// Re-export core types
+export type { Guard, GuardType, GuardMeta, GuardErr } from './shared.js';
+
+// Re-export guard authoring utilities for custom guard creation
+export { makeGuard, factory, transformer, terminal, property } from './shared.js';
 
 const baseIs = {
 	// ---- PRIMITIVES ----
@@ -278,9 +290,80 @@ const baseIs = {
 	 * guard(4); // false
 	 */
 	enum: EnumGuardFactory,
+
+	// ---- CHAS TYPES ----
+	/**
+	 * Creates a Guard that validates that a value is a `Result` (Ok or Err).
+	 *
+	 * Provides chainable helpers to narrow into `.ok` or `.err` variants
+	 * and optionally validate the inner value or error type.
+	 *
+	 * @example
+	 * ```ts
+	 * is.result()(ok(42));            // true
+	 * is.result()(err('fail'));       // true
+	 * is.result()('not a result');    // false
+	 *
+	 * is.result.ok(ok(42));         // true
+	 * is.result.err(err('fail'));   // true
+	 *
+	 * // Validate inner types
+	 * is.result.okOf(is.number)(ok(42));          // true
+	 * is.result.errOf(is.string)(err('fail'));    // true
+	 * is.result.of(is.number, is.string)(ok(42)); // true
+	 *
+	 * // Narrow then inspect
+	 * is.result.ok.valueIs(is.number)(ok(42));    // true
+	 * ```
+	 */
+	result: ResultGuardFactory,
+	/**
+	 * Creates a Guard that validates that a value is an `Option` (Some or None).
+	 *
+	 * Since Options are implemented as Results under the hood, this checks for
+	 * Result structure plus the Option-specific `isSome`/`isNone` methods.
+	 *
+	 * @example
+	 * ```ts
+	 * is.option(some(42));          // true
+	 * is.option(none());            // true
+	 * is.option('not an option');   // false
+	 *
+	 * is.option.some(some(42));     // true
+	 * is.option.none(none());       // true
+	 *
+	 * // Validate inner type
+	 * is.option.someOf(is.number)(some(42));      // true
+	 * is.option.some.valueIs(is.string)(some(42)); // false
+	 * ```
+	 */
+	option: OptionGuard,
 };
 
-export type IsAPI<Extensions = {}> = typeof baseIs & Extensions;
+/**
+ * The base `is` API type, derived from `baseIs` plus an `extend` method.
+ */
+export type IsAPI<Extensions = {}> = typeof baseIs & {
+	/**
+	 * Returns a new `is` instance with additional custom guards (or any other properties).
+	 *
+	 * @param extensions - Custom guards to add.
+	 * @returns A new IsAPI instance with all base guards plus the extensions.
+	 *
+	 * @example
+	 * ```ts
+	 * const myIs = is.extend({
+	 *   email: is.string.trim().email,
+	 *   posInt: is.number.int.positive,
+	 * });
+	 *
+	 * myIs.email('hello@example.com'); // true
+	 * myIs.posInt(42); // true
+	 * myIs.string('still works'); // true
+	 * ```
+	 */
+	extend: <E extends Record<string, any>>(extensions: E) => IsAPI<E>;
+} & Extensions;
 
 /**
  * The entry point for the Guard API.
@@ -309,6 +392,8 @@ export type IsAPI<Extensions = {}> = typeof baseIs & Extensions;
  * ### Schema Definitions
  *
  * Guards can be used to define schemas that can be used to validate & transform values.
+ * Schemas are created using `defineSchemas`, which returns a `Schema`.
+ * This `Schema` can then be parsed or asserted against for deep recursive validation & error collection.
  *
  * ### Transformations
  *
@@ -337,5 +422,26 @@ export type IsAPI<Extensions = {}> = typeof baseIs & Extensions;
  *
  * Guards implement the `Standard Schema V1` interface (`~standard`), making them
  * compatible with many form libraries and other validation ecosystems.
+ *
+ * ### Customization
+ *
+ * The `is` API can be extended with custom guards using the `.extend()` method.
+ *
+ * @example
+ * ```typescript
+ * import { is } from 'ts-chas/guard';
+ *
+ * const myIs = is.extend({
+ *   email: is.string.trim().email,
+ *   posInt: is.number.int.positive,
+ * });
+ *
+ * myIs.email('hello@example.com'); // true
+ * myIs.posInt(42); // true
+ * myIs.string('still works'); // true
+ * ```
  */
-export const is: IsAPI = baseIs;
+export const is: IsAPI = Object.assign(baseIs, {
+	extend: <E extends Record<string, any>>(extensions: E): IsAPI<E> =>
+		({ ...baseIs, extend: (is as IsAPI).extend, ...extensions }) as IsAPI<E>,
+});

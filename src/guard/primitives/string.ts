@@ -77,7 +77,7 @@ interface IsoHelpers {
 }
 
 interface BoolStrParsed {
-	toBool: Guard<boolean, {}>;
+	asBool: Guard<boolean, {}>;
 }
 
 interface BoolStrHelpers extends BoolStrParsed {
@@ -740,10 +740,10 @@ const stringHelpers: StringHelpers = {
 	) as any,
 	boolStr: property(
 		transformer<string, string, [], BoolStrHelpers>(target => {
-			const toBool = property(
+			const asBool = property(
 				transformer<string, boolean, [], {}>((innerTarget: Guard<string>) => ({
 					fn: (v: unknown): v is boolean => innerTarget(v),
-					meta: { name: `${innerTarget.meta.name}.toBool`, id: 'boolean' },
+					meta: { name: `${innerTarget.meta.name}.asBool`, id: 'boolean' },
 					transform: (v: string) => boolStrVals.truthy.has(v.toLowerCase()),
 					replaceHelpers: true,
 				}))
@@ -756,31 +756,57 @@ const stringHelpers: StringHelpers = {
 				StringHelpers & BoolStrParsed
 			>((innerTarget, options) => ({
 				fn: (v: unknown): v is string => {
-					if (!innerTarget(v)) return false;
+					if (!target(v)) return false;
+					const str = v as string;
+
+					if (options?.values) {
+						if (options.caseSensitive) return options.values.includes(str);
+						const val = str.toLowerCase();
+						return options.values.some(v => v.toLowerCase() === val);
+					}
 
 					if (options?.caseSensitive) {
 						return (
-							boolStrVals.truthy.has(v) ||
-							boolStrVals.truthyCapitalized.has(v) ||
-							boolStrVals.truthyAllCaps.has(v)
+							boolStrVals.truthy.has(str) ||
+							boolStrVals.truthyCapitalized.has(str) ||
+							boolStrVals.truthyAllCaps.has(str)
 						);
 					}
 
-					const value = v.toLowerCase();
-					return boolStrVals.truthy.has(value);
+					return boolStrVals.truthy.has(str.toLowerCase());
 				},
 				meta: { name: `${innerTarget.meta.name}.truthy`, id: 'string' },
-				helpers: { toBool } as any,
+				helpers: { asBool } as any,
 			}));
 
-			const falsy = transformer<string, string, [], StringHelpers & BoolStrParsed>(innerTarget => ({
+			const falsy = transformer<
+				string,
+				string,
+				[{ caseSensitive?: boolean; values?: readonly string[] }?],
+				StringHelpers & BoolStrParsed
+			>((innerTarget, options) => ({
 				fn: (v: unknown): v is string => {
-					if (!innerTarget(v)) return false;
-					const value = v.toLowerCase();
-					return boolStrVals.falsy.has(value);
+					if (!target(v)) return false;
+					const str = v as string;
+
+					if (options?.values) {
+						if (options.caseSensitive) return options.values.includes(str);
+						const val = str.toLowerCase();
+						return options.values.some(v => v.toLowerCase() === val);
+					}
+
+					if (options?.caseSensitive) {
+						return (
+							boolStrVals.falsy.has(str) ||
+							boolStrVals.falsyCapitalized.has(str) ||
+							boolStrVals.falsyAllCaps.has(str)
+						);
+					}
+
+					return boolStrVals.falsy.has(str.toLowerCase());
 				},
 				meta: { name: `${innerTarget.meta.name}.falsy`, id: 'string' },
-				helpers: { toBool } as any,
+				helpers: { asBool } as any,
 			}));
 
 			return {
@@ -790,7 +816,7 @@ const stringHelpers: StringHelpers = {
 					return boolStrVals.truthy.has(value) || boolStrVals.falsy.has(value);
 				},
 				meta: { name: 'string.boolStr', id: 'string' },
-				helpers: { truthy: truthy as any, falsy: falsy as any, toBool: toBool as any } as any,
+				helpers: { truthy: truthy as any, falsy: falsy as any, asBool: asBool as any } as any,
 			};
 		})
 	) as any,

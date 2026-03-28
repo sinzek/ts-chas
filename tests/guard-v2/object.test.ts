@@ -45,6 +45,11 @@ describe('is.object (v2)', () => {
 			expect(guard({})).toBe(true);
 			expect(guard({ a: 'foo' })).toBe(true);
 			expect(guard({ a: 123 })).toBe(false); // still checks types if present
+			const guard2 = base.partial('a');
+			expect(guard2({ a: 'foo' })).toBe(true);
+			expect(guard2({ a: 'foo', b: 123 })).toBe(true);
+			expect(guard2({})).toBe(false); // missing a
+			expect(guard2({ b: 123 })).toBe(false); // missing a
 		});
 
 		it('pick', () => {
@@ -85,6 +90,14 @@ describe('is.object (v2)', () => {
 			expect(is.object().hasAll(['a', 'b'])({ a: 1, b: 2 })).toBe(true);
 			expect(is.object().hasOnly(['a'])({ a: 1 })).toBe(true);
 			expect(is.object().hasOnly(['a'])({ a: 1, b: 2 })).toBe(false);
+		});
+
+		it('catchall', () => {
+			const guard = is.object({ a: is.number }).catchall(is.string);
+			expect(guard({ a: 1, b: '2' })).toBe(true);
+			expect(guard({ a: 1, b: 2 })).toBe(false);
+			expect(guard({ a: 1, b: '2', c: '3' })).toBe(true);
+			expect(guard({ a: 1, b: '2', c: 3 })).toBe(false);
 		});
 	});
 

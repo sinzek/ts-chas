@@ -1,3 +1,4 @@
+import { safeStringify } from '../../utils.js';
 import { makeGuard, type Guard, transformer } from '../shared.js';
 
 export interface EnumHelpers<T> {
@@ -17,14 +18,14 @@ const enumHelpers: EnumHelpers<any> = {
 		const valuesSet = new Set(values);
 		return {
 			fn: (v: unknown): v is any => target(v) && !valuesSet.has(v as any),
-			meta: { name: `${target.meta.name}.exclude(${values.join(', ')})` },
+			meta: { name: `${target.meta.name}.exclude(${values.map(safeStringify).join(', ')})` },
 		};
 	}) as any,
 	extract: transformer((target, ...values: readonly any[]) => {
 		const valuesSet = new Set(values);
 		return {
 			fn: (v: unknown): v is any => target(v) && valuesSet.has(v as any),
-			meta: { name: `${target.meta.name}.extract(${values.join(', ')})` },
+			meta: { name: `${target.meta.name}.extract(${values.map(safeStringify).join(', ')})` },
 		};
 	}) as any,
 };
@@ -35,7 +36,7 @@ export const EnumGuardFactory: EnumGuardFactory = (values: readonly any[] | Reco
 
 	if (Array.isArray(values)) {
 		valuesArray = values;
-		name = values.join(' | ');
+		name = values.map(safeStringify).join(' | ');
 	} else {
 		// filter out reverse mapping keys (which are strings of numbers)
 		const keys = Object.keys(values).filter(k => isNaN(Number(k)));

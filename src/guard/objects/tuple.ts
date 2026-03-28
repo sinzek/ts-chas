@@ -15,5 +15,9 @@ export const TupleGuardFactory: TupleGuardFactory = (...guards) => {
 		return guards.every((guard, i) => guard(value[i]));
 	};
 
-	return makeGuard(fn, { name: `tuple<${guards.map(g => g.meta.name).join(', ')}>`, id: 'tuple' }, tupleHelpers);
+	return makeGuard(
+		fn,
+		{ name: `tuple<${guards.map(g => g.meta.name).join(', ')}>`, id: 'tuple', tupleGuards: [...guards] },
+		tupleHelpers
+	);
 };

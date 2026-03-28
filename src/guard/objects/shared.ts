@@ -14,11 +14,16 @@ import {
 
 export type ObjectHelpers<T> = {
 	/**
-	 * Makes the object schema partial (all keys optional).
+	 * Makes the object schema partial. All keys will be optional by default, but you can specify keys to keep required.
 	 */
-	partial: () => Guard<Partial<T>, ObjectHelpers<Partial<T>>>;
+	partial: {
+		(): Guard<Partial<T>, ObjectHelpers<Partial<T>>>;
+		<K extends keyof T>(
+			...keys: K[]
+		): Guard<Prettify<Pick<T, K> & Partial<Omit<T, K>>>, ObjectHelpers<Pick<T, K> & Partial<Omit<T, K>>>>;
+	};
 	/**
-	 * Picks specific keys from the object schema.
+	 * Picks specific keys from the object schema and makes them the only keys in the resulting schema.
 	 */
 	pick: <K extends keyof T>(keys: K[]) => Guard<Prettify<Pick<T, K>>, ObjectHelpers<Pick<T, K>>>;
 	/**
@@ -26,7 +31,7 @@ export type ObjectHelpers<T> = {
 	 */
 	omit: <K extends keyof T>(keys: K[]) => Guard<Prettify<Omit<T, K>>, ObjectHelpers<Omit<T, K>>>;
 	/**
-	 * Extends the object schema with another schema.
+	 * Extends the object schema with another schema. The resulting schema will have all keys from both schemas.
 	 */
 	extend: <S extends Record<string, Guard<any>>>(
 		schema: S
@@ -45,34 +50,63 @@ export type ObjectHelpers<T> = {
 		guard: TCatchall
 	) => Guard<T & Record<string, GuardType<TCatchall>>, ObjectHelpers<T & Record<string, GuardType<TCatchall>>>>;
 
-	// Valuations
+	/**
+	 * Validates that the object has exactly n keys.
+	 * @param n The exact number of keys the object must have.
+	 */
 	size: (n: number) => Guard<T, ObjectHelpers<T>>;
+	/**
+	 * Validates that the object has at least n keys.
+	 * @param n The minimum number of keys the object must have.
+	 */
 	minSize: (n: number) => Guard<T, ObjectHelpers<T>>;
+	/**
+	 * Validates that the object has at most n keys.
+	 * @param n The maximum number of keys the object must have.
+	 */
 	maxSize: (n: number) => Guard<T, ObjectHelpers<T>>;
+	/**
+	 * Validates that the object has a key.
+	 * @param key The key to check for.
+	 */
 	has: (key: string) => Guard<T, ObjectHelpers<T>>;
+	/**
+	 * Validates that the object has all the specified keys.
+	 * @param keys The keys to check for.
+	 */
 	hasAll: (keys: string[]) => Guard<T, ObjectHelpers<T>>;
+	/**
+	 * Validates that the object has only the specified keys.
+	 * @param keys The keys to check for.
+	 */
 	hasOnly: (keys: string[]) => Guard<T, ObjectHelpers<T>>;
 };
 
-export const objectHelpers = {
-	// --- Transformations ---
-	partial: transformer<any, any, [], ObjectHelpers<any>>(target => {
+export const objectHelpers: ObjectHelpers<Record<string, any>> = {
+	partial: transformer<any, any, string[], ObjectHelpers<any>>((target, ...requiredKeys) => {
 		const schema = target.meta.shape;
 		const nextFn = (v: unknown): v is any => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
 			if (!schema) return true;
-			// If target already passed, we are good.
-			// But target might fail because keys are missing.
-			// So we re-validate partial-style.
 			const obj = v as any;
 			for (const key of Object.keys(schema)) {
-				if (obj[key] !== undefined && !(schema as any)[key](obj[key])) return false;
+				const isRequired = requiredKeys.includes(key);
+				const value = obj[key];
+
+				if (isRequired) {
+					if (value === undefined || !(schema as any)[key](value)) return false;
+				} else {
+					if (value !== undefined && !(schema as any)[key](value)) return false;
+				}
 			}
 			return true;
 		};
 		return {
 			fn: nextFn,
-			meta: { name: `${target.meta.name}.partial()`, shape: schema || {} },
+			meta: {
+				name: `${target.meta.name}.partial(${requiredKeys.length > 0 ? requiredKeys.join(', ') : ''})`,
+				shape: schema || {},
+			},
 		};
 	}),
 	pick: transformer<any, any, [string[]], ObjectHelpers<any>>((target, keys: string[]) => {
@@ -175,7 +209,7 @@ export const objectHelpers = {
 			};
 			return { fn: nextFn, meta: { name: `${target.meta.name}.strict` } };
 		})
-	),
+	) as any,
 	catchall: transformer<any, any, [Guard<any>], ObjectHelpers<any>>((target, catchall: Guard<any>) => {
 		const schema = target.meta.shape;
 		const nextFn = (v: unknown): v is any => {

@@ -6,7 +6,7 @@ describe('is.enum (v2)', () => {
 		const guard = is.enum(['red', 'green', 'blue']);
 		expect(guard('red')).toBe(true);
 		expect(guard('yellow')).toBe(false);
-		expect(guard.meta.name).toBe('enum<red | green | blue>');
+		expect(guard.meta.name).toBe('enum<"red" | "green" | "blue">');
 	});
 
 	it('validates from plain object (using keys for name)', () => {
@@ -48,14 +48,14 @@ describe('is.enum (v2)', () => {
 			const guard = is.enum(['a', 'b', 'c']).exclude('a', 'b');
 			expect(guard('c')).toBe(true);
 			expect(guard('a')).toBe(false);
-			expect(guard.meta.name).toBe('enum<a | b | c>.exclude(a, b)');
+			expect(guard.meta.name).toBe('enum<"a" | "b" | "c">.exclude("a", "b")');
 		});
 
 		it('extract', () => {
 			const guard = is.enum(['a', 'b', 'c']).extract('a', 'b');
 			expect(guard('a')).toBe(true);
 			expect(guard('c')).toBe(false);
-			expect(guard.meta.name).toBe('enum<a | b | c>.extract(a, b)');
+			expect(guard.meta.name).toBe('enum<"a" | "b" | "c">.extract("a", "b")');
 		});
 	});
 });

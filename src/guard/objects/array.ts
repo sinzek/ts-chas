@@ -48,6 +48,7 @@ export const ArrayGuardFactory: ArrayGuardFactory = <G extends Guard<any, Record
 		{
 			name: `array<${guards.map(guard => guard.meta.name).join(', ')}>`,
 			id: 'array',
+			elementGuards: guards.length > 0 ? guards : undefined,
 		},
 		arrayHelpers
 	);

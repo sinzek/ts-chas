@@ -246,7 +246,7 @@ describe('is.string (v2)', () => {
 		});
 
 		it('err (custom message)', () => {
-			const guard = is.string.min(5).err('TOO SHORT');
+			const guard = is.string.min(5).error('TOO SHORT');
 			const res = guard.parse('abc');
 			expect(res.unwrapErr().message).toBe('TOO SHORT');
 		});
@@ -269,7 +269,12 @@ describe('is.string (v2)', () => {
 			expect(is.string.boolStr('0')).toBe(true);
 			expect(is.string.boolStr('yes')).toBe(true);
 			expect(is.string.boolStr('no')).toBe(true);
+			expect(is.string.boolStr('on')).toBe(true);
+			expect(is.string.boolStr('off')).toBe(true);
+			expect(is.string.boolStr('enabled')).toBe(true);
+			expect(is.string.boolStr('disabled')).toBe(true);
 			expect(is.string.boolStr('active')).toBe(true);
+			expect(is.string.boolStr('inactive')).toBe(true);
 			expect(is.string.boolStr('invalid')).toBe(false);
 		});
 
@@ -277,37 +282,65 @@ describe('is.string (v2)', () => {
 			expect(is.string.boolStr.truthy()('true')).toBe(true);
 			expect(is.string.boolStr.truthy()('1')).toBe(true);
 			expect(is.string.boolStr.truthy()('yes')).toBe(true);
+			expect(is.string.boolStr.truthy()('on')).toBe(true);
+			expect(is.string.boolStr.truthy()('enabled')).toBe(true);
+			expect(is.string.boolStr.truthy()('active')).toBe(true);
 			expect(is.string.boolStr.truthy()('false')).toBe(false);
 			expect(is.string.boolStr.truthy()('0')).toBe(false);
+		});
+
+		it('should handle caseSensitive in truthy', () => {
+			const guard = is.string.boolStr.truthy({ caseSensitive: true });
+			expect(guard('true')).toBe(true);
+			expect(guard('True')).toBe(true);
+			expect(guard('TRUE')).toBe(true);
+			expect(guard('trUE')).toBe(false);
+		});
+
+		it('should handle custom values in truthy', () => {
+			const guard = is.string.boolStr.truthy({ values: ['yup', 'yep'] });
+			expect(guard('yup')).toBe(true);
+			expect(guard('YEP')).toBe(true); // case-insensitive by default
+			expect(guard('true')).toBe(false);
 		});
 
 		it('should validate falsy boolStr', () => {
 			expect(is.string.boolStr.falsy()('false')).toBe(true);
 			expect(is.string.boolStr.falsy()('0')).toBe(true);
 			expect(is.string.boolStr.falsy()('no')).toBe(true);
+			expect(is.string.boolStr.falsy()('off')).toBe(true);
+			expect(is.string.boolStr.falsy()('disabled')).toBe(true);
+			expect(is.string.boolStr.falsy()('inactive')).toBe(true);
 			expect(is.string.boolStr.falsy()('true')).toBe(false);
 			expect(is.string.boolStr.falsy()('1')).toBe(false);
 		});
 
-		it('should transform to boolean using .toBool', () => {
-			// toBool is a transformer, so it returns a boolean Result when parsed
-			const trueVal = is.string.boolStr.toBool.parse('true').unwrap();
+		it('should handle custom values in falsy', () => {
+			const guard = is.string.boolStr.falsy({ values: ['nope', 'nah'] });
+			expect(guard('nope')).toBe(true);
+			expect(guard('NAH')).toBe(true);
+			expect(guard('false')).toBe(false);
+		});
+
+		it('should transform to boolean using .asBool', () => {
+			// asBool is a transformer, so it returns a boolean Result when parsed
+			const trueVal = is.string.boolStr.asBool.parse('true').unwrap();
 			expect(trueVal).toBe(true);
 			expect(typeof trueVal).toBe('boolean');
 
-			const falseVal = is.string.boolStr.toBool.parse('0').unwrap();
+			const falseVal = is.string.boolStr.asBool.parse('0').unwrap();
 			expect(falseVal).toBe(false);
 
 			// Should fail parsing if not a boolStr
-			expect(is.string.boolStr.toBool.parse('invalid').isErr()).toBe(true);
+			expect(is.string.boolStr.asBool.parse('invalid').isErr()).toBe(true);
 		});
 
-		it('should have .toBool on .truthy and .falsy', () => {
-			expect(is.string.boolStr.truthy().toBool.parse('true').unwrap()).toBe(true);
-			expect(is.string.boolStr.falsy().toBool.parse('false').unwrap()).toBe(false);
+		it('should have .asBool on .truthy and .falsy', () => {
+			expect(is.string.boolStr.truthy().asBool.parse('true').unwrap()).toBe(true);
+			expect(is.string.boolStr.falsy().asBool.parse('false').unwrap()).toBe(false);
 
-			// truthy.toBool should fail on a falsy string even if it is a boolStr
-			expect(is.string.boolStr.truthy().toBool.parse('false').isErr()).toBe(true);
+			// truthy.asBool should fail on a falsy string even if it is a boolStr
+			expect(is.string.boolStr.truthy().asBool.parse('false').isErr()).toBe(true);
 		});
 	});
 });
