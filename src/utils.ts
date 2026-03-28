@@ -55,29 +55,6 @@ export const exhaustiveArray =
 /**
  * Performs a deep equality check between two values.
  */
-/**
- * A branded type that adds a compile-time tag to a base type.
- * This is a phantom type w/ no runtime cost.
- *
- * @example
- * ```ts
- * type Email = Brand<"Email", string>;
- * type UserId = Brand<"UserId", string>;
- *
- * // These are incompatible at compile time even though both are strings:
- * declare function sendEmail(to: Email): void;
- * declare const userId: UserId;
- * sendEmail(userId); // Type error
- * ```
- */
-export type Brand<Tag extends string, Base> = Base & { readonly __brand: Tag };
-
-/**
- * Creates a branded value from an already-validated value. Use with caution —
- * prefer using branded guards for runtime validation + compile-time safety.
- */
-export const unsafeBrand = <Tag extends string, Base>(value: Base): Brand<Tag, Base> => value as Brand<Tag, Base>;
-
 export function deepEqual(a: any, b: any): boolean {
 	if (a === b) return true;
 
@@ -113,3 +90,25 @@ export function deepEqual(a: any, b: any): boolean {
 
 	return true;
 }
+
+export const isSafeObject = (obj: any): boolean => {
+	if (obj && typeof obj === 'object') {
+		if ('__proto__' in obj) return false;
+		return Object.values(obj).every(isSafeObject);
+	}
+	return true;
+};
+
+export function getObjectDepth(obj: any, depth = 0): number {
+	if (obj === null || typeof obj !== 'object') return depth;
+	return Math.max(...Object.values(obj).map(v => getObjectDepth(v, depth + 1)));
+}
+
+export const safeStringify = (v: any): string => {
+	try {
+		if (v instanceof RegExp) return v.source;
+		return JSON.stringify(v, (_, value) => (typeof value === 'bigint' ? `${value}n` : value));
+	} catch {
+		return String(v);
+	}
+};

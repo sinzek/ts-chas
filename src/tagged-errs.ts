@@ -16,8 +16,6 @@ export type TaggedErr = Error & {
 /** Maps tag names to factory functions that produce the error data (without the `_tag` field). */
 type ErrorDefinitions = Record<string, (...args: any[]) => object>;
 
-
-
 /**
  * Type that represents the factory functions for a set of tagged error definitions.
  */
@@ -426,7 +424,15 @@ export const isAnyErrWithTag = <E extends TaggedErr, Tag extends E['_tag']>(
 };
 
 export const GlobalErrs = defineErrs({
-	GuardErr: (props: { message: string; path: string[]; expected: string; actual: string; schema?: string }) => props,
+	GuardErr: (props: {
+		name: string;
+		message: string;
+		path: string[];
+		expected: string;
+		actual: string;
+		schema?: string | undefined;
+		values?: Set<any> | undefined;
+	}) => props,
 	ChasErr: (props: { message: string; origin: string; cause?: unknown }) => props,
 });
 
