@@ -26,16 +26,6 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
-    },
     "./tagged-errs": {
       "import": {
         "types": "./dist/tagged-errs.d.ts",
@@ -48,12 +38,12 @@
     },
     "./result": {
       "import": {
-        "types": "./dist/result.d.ts",
-        "default": "./dist/result.js"
+        "types": "./dist/result/index.d.ts",
+        "default": "./dist/result/index.js"
       },
       "require": {
-        "types": "./dist/result.d.cts",
-        "default": "./dist/result.cjs"
+        "types": "./dist/result/index.d.cts",
+        "default": "./dist/result/index.cjs"
       }
     },
     "./option": {
@@ -78,12 +68,12 @@
     },
     "./guard": {
       "import": {
-        "types": "./dist/guard.d.ts",
-        "default": "./dist/guard.js"
+        "types": "./dist/guard/index.d.ts",
+        "default": "./dist/guard/index.js"
       },
       "require": {
-        "types": "./dist/guard.d.cts",
-        "default": "./dist/guard.cjs"
+        "types": "./dist/guard/index.d.cts",
+        "default": "./dist/guard/index.cjs"
       }
     },
     "./pipe": {
@@ -94,16 +84,6 @@
       "require": {
         "types": "./dist/pipe.d.cts",
         "default": "./dist/pipe.cjs"
-      }
-    },
-    "./config": {
-      "import": {
-        "types": "./dist/config.d.ts",
-        "default": "./dist/config.js"
-      },
-      "require": {
-        "types": "./dist/config.d.cts",
-        "default": "./dist/config.cjs"
       }
     }
   },

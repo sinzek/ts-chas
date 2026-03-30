@@ -1,17 +1,11 @@
-import {
-	ok,
-	err,
-	okAsync,
-	errAsync,
-	fromSafePromise,
-	ResultAsync,
-	type Ok,
-	type Err,
-	type ResultMethods,
-	type ExtractOkValue,
-} from './result.js';
+import { ok, err, okAsync, errAsync, ResultAsync } from './result/result.js';
+
+import { fromSafePromise } from './result/result-helpers.js';
+import type { Ok, Err, ExtractOkValue } from './result/shared.js';
+
 import { type NonVoid } from './utils.js';
-import { type Guard } from './guard.js';
+import type { Guard } from './guard/index.js';
+import type { ResultMethods } from './result/result.js';
 
 /**
  * Represents the "None" variant of an `Option` (equivalent to `Err<never>`)
@@ -390,9 +384,7 @@ export const shapeNullableAsync = <TRec extends Record<string, OptionAsync<any> 
  * safeParse('invalid');   // None
  * ```
  */
-export const wrapNullable = <Args extends unknown[], T>(
-	fn: (...args: Args) => T
-): ((...args: Args) => Option<T>) => {
+export const wrapNullable = <Args extends unknown[], T>(fn: (...args: Args) => T): ((...args: Args) => Option<T>) => {
 	return (...args: Args): Option<T> => {
 		try {
 			const res = fn(...args);
@@ -449,30 +441,3 @@ export const wrapNullableAsync = <Args extends unknown[], T>(
 export const optionFromGuard = <T>(value: unknown, guard: Guard<T>): Option<T> => {
 	return guard(value) ? (some(value as any) as Some<T>) : none();
 };
-
-/**
- * Also a namespace for Option utilities, merges with the `Option` type definition.
- */
-export const Option = {
-	some,
-	none,
-	nullable,
-	tryNullable,
-	fromGuard: optionFromGuard,
-	allNullable,
-	shapeNullable,
-	wrapNullable,
-} as const;
-
-/**
- * Also a namespace for OptionAsync utilities, merges with the `OptionAsync` type definition.
- */
-export const OptionAsync = {
-	some: someAsync,
-	none: noneAsync,
-	nullable: nullableAsync,
-	tryNullable: tryNullableAsync,
-	allNullable: allNullableAsync,
-	shapeNullable: shapeNullableAsync,
-	wrapNullable: wrapNullableAsync,
-} as const;

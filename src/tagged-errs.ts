@@ -1,4 +1,5 @@
-import { err, tryCatch, fromPromise, type Result, type ResultAsync } from './result.js';
+import { err, type Result, type ResultAsync } from './result/result.js';
+import { fromPromise, tryCatch } from './result/result-helpers.js';
 import type { Prettify } from './utils.js';
 
 /**
@@ -121,13 +122,15 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
  *
  * @example
  * ```ts
- * const AppError = chas.defineErrs({ NotFound: () => ({}) });
- * type AppError = chas.InferErrs<typeof AppError>; // { readonly _tag: "NotFound" }
+ * const AppError = chas.defineErrs({ NotFound: () => ({}), Generic: (message: string) => ({ message }) });
+ * type AppError = chas.InferErrs<typeof AppError>; // { readonly _tag: "NotFound" } | { readonly _tag: "Generic", message: string }
  * ```
  */
-export type InferErrs<T extends ErrorFactories<any, any>> = {
-	[K in keyof T & string]: T[K] extends (...args: any[]) => infer R ? R : never;
-}[keyof T & string];
+export type InferErrs<T extends ErrorFactories<any, any>> = T[keyof T & string] extends infer F
+	? F extends (...args: any[]) => infer R
+		? R
+		: never
+	: never;
 
 /**
  * Extracts a single error variant from an error factory.
@@ -248,7 +251,7 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 		};
 
 		factory.is = (err: any): err is any => {
-			return err && typeof err === 'object' && '_tag' in err && err._tag === tag;
+			return !!err && typeof err === 'object' && '_tag' in err && err._tag === tag;
 		};
 
 		factory.try = (fn: () => any, onThrow?: (e: unknown) => any[]) => {
@@ -435,17 +438,3 @@ export const GlobalErrs = defineErrs({
 	}) => props,
 	ChasErr: (props: { message: string; origin: string; cause?: unknown }) => props,
 });
-
-/**
- * Also a namespace for Tagged Error utilities, merges with the `TaggedErr` type definition.
- */
-export const TaggedErrs = {
-	define: defineErrs,
-	match: matchErr,
-	matchAsync: matchErrAsync,
-	matchPartial: matchErrPartial,
-	matchPartialAsync: matchErrPartialAsync,
-	is: isErrWithTag,
-	isAny: isAnyErrWithTag,
-	global: GlobalErrs,
-};

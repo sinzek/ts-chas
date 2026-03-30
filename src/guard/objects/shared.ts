@@ -1,26 +1,39 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-
 import type { Prettify } from '../../utils.js';
-import {
-	factory,
-	transformer,
-	type Guard,
-	type GuardType,
-	FACTORY,
-	TRANSFORMER,
-	PROPERTY,
-	property,
-} from '../shared.js';
+import { factory, transformer, type Guard, type InferGuard, property } from '../shared.js';
+import { type EnumHelpers, EnumGuardFactory } from '../misc/enum.js';
 
 export type ObjectHelpers<T> = {
 	/**
-	 * Makes the object schema partial. All keys will be optional by default, but you can specify keys to keep required.
+	 * Makes the object schema partial. With no arguments, all keys become optional.
+	 * When keys are specified, only those keys become optional while the rest remain as-is.
+	 *
+	 * @example
+	 * ```ts
+	 * is.object({ a: is.string, b: is.number }).partial();      // Guard<{ a?: string; b?: number }>
+	 * is.object({ a: is.string, b: is.number }).partial('b');    // Guard<{ a: string; b?: number }>
+	 * ```
 	 */
 	partial: {
 		(): Guard<Partial<T>, ObjectHelpers<Partial<T>>>;
 		<K extends keyof T>(
 			...keys: K[]
-		): Guard<Prettify<Pick<T, K> & Partial<Omit<T, K>>>, ObjectHelpers<Pick<T, K> & Partial<Omit<T, K>>>>;
+		): Guard<Prettify<Omit<T, K> & Partial<Pick<T, K>>>, ObjectHelpers<Omit<T, K> & Partial<Pick<T, K>>>>;
+	};
+	/**
+	 * Makes the object schema required. With no arguments, all keys become required.
+	 * When keys are specified, only those keys become required while the rest remain as-is.
+	 *
+	 * @example
+	 * ```ts
+	 * is.object({ a: is.string.optional, b: is.number.optional }).required();      // Guard<{ a: string; b: number }>
+	 * is.object({ a: is.string.optional, b: is.number.optional }).required('a');    // Guard<{ a: string; b?: number }>
+	 * ```
+	 */
+	required: {
+		(): Guard<Required<T>, ObjectHelpers<Required<T>>>;
+		<K extends keyof T>(
+			...keys: K[]
+		): Guard<Prettify<Omit<T, K> & Required<Pick<T, K>>>, ObjectHelpers<Omit<T, K> & Required<Pick<T, K>>>>;
 	};
 	/**
 	 * Picks specific keys from the object schema and makes them the only keys in the resulting schema.
@@ -36,8 +49,8 @@ export type ObjectHelpers<T> = {
 	extend: <S extends Record<string, Guard<any>>>(
 		schema: S
 	) => Guard<
-		Prettify<T & { [K in keyof S]: GuardType<S[K]> }>,
-		ObjectHelpers<T & { [K in keyof S]: GuardType<S[K]> }>
+		Prettify<T & { [K in keyof S]: InferGuard<S[K]> }>,
+		ObjectHelpers<T & { [K in keyof S]: InferGuard<S[K]> }>
 	>;
 	/**
 	 * Ensures the object has NO extra keys not defined in the schema.
@@ -48,7 +61,7 @@ export type ObjectHelpers<T> = {
 	 */
 	catchall: <TCatchall extends Guard<any>>(
 		guard: TCatchall
-	) => Guard<T & Record<string, GuardType<TCatchall>>, ObjectHelpers<T & Record<string, GuardType<TCatchall>>>>;
+	) => Guard<T & Record<string, InferGuard<TCatchall>>, ObjectHelpers<T & Record<string, InferGuard<TCatchall>>>>;
 
 	/**
 	 * Validates that the object has exactly n keys.
@@ -66,10 +79,23 @@ export type ObjectHelpers<T> = {
 	 */
 	maxSize: (n: number) => Guard<T, ObjectHelpers<T>>;
 	/**
-	 * Validates that the object has a key.
-	 * @param key The key to check for.
+	 * Validates that the object has a key, optionally narrowing the key's type.
+	 *
+	 * @example
+	 * ```ts
+	 * is.object({ a: is.string }).has('b');              // Guard<{ a: string } & { b: unknown }>
+	 * is.object({ a: is.string }).has('b', is.number);   // Guard<{ a: string } & { b: number }>
+	 * ```
 	 */
-	has: (key: string) => Guard<T, ObjectHelpers<T>>;
+	has: {
+		<K extends string>(
+			key: K
+		): Guard<Prettify<T & { [P in K]: unknown }>, ObjectHelpers<T & { [P in K]: unknown }>>;
+		<K extends string, G extends Guard<any, any>>(
+			key: K,
+			guard: G
+		): Guard<Prettify<T & { [P in K]: InferGuard<G> }>, ObjectHelpers<T & { [P in K]: InferGuard<G> }>>;
+	};
 	/**
 	 * Validates that the object has all the specified keys.
 	 * @param keys The keys to check for.
@@ -80,20 +106,65 @@ export type ObjectHelpers<T> = {
 	 * @param keys The keys to check for.
 	 */
 	hasOnly: (keys: string[]) => Guard<T, ObjectHelpers<T>>;
+	/**
+	 * Returns an enum guard of the object's schema keys.
+	 * Useful for deriving a key guard from an existing object schema.
+	 *
+	 * @example
+	 * ```ts
+	 * const User = is.object({ name: is.string, age: is.number });
+	 * const UserKey = User.keyof; // Guard<'name' | 'age'>
+	 * UserKey('name');  // true
+	 * UserKey('email'); // false
+	 * ```
+	 */
+	keyof: Guard<keyof T & string, EnumHelpers<keyof T & string>>;
+	/**
+	 * Transforms the object schema to be readonly with Object.freeze().
+	 *
+	 * Note that further refinements will throw runtime errors.
+	 */
+	readonly: Guard<Readonly<T>, ObjectHelpers<Readonly<T>>>;
 };
 
 export const objectHelpers: ObjectHelpers<Record<string, any>> = {
-	partial: transformer<any, any, string[], ObjectHelpers<any>>((target, ...requiredKeys) => {
+	partial: transformer<any, any, string[], ObjectHelpers<any>>((target, ...partialKeys) => {
 		const schema = target.meta.shape;
+		// No keys specified = all keys are optional; keys specified = only those are optional
+		const isPartialKey = partialKeys.length > 0 ? (key: string) => partialKeys.includes(key) : () => true;
 		const nextFn = (v: unknown): v is any => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
 			if (!schema) return true;
 			const obj = v as any;
 			for (const key of Object.keys(schema)) {
-				const isRequired = requiredKeys.includes(key);
 				const value = obj[key];
-
-				if (isRequired) {
+				if (isPartialKey(key)) {
+					if (value !== undefined && !(schema as any)[key](value)) return false;
+				} else {
+					if (value === undefined || !(schema as any)[key](value)) return false;
+				}
+			}
+			return true;
+		};
+		return {
+			fn: nextFn,
+			meta: {
+				name: `${target.meta.name}.partial(${partialKeys.length > 0 ? partialKeys.join(', ') : ''})`,
+				shape: schema || {},
+			},
+		};
+	}),
+	required: transformer<any, any, string[], ObjectHelpers<any>>((target, ...requiredKeys) => {
+		const schema = target.meta.shape;
+		// No keys specified = all keys are required; keys specified = only those are required
+		const isRequiredKey = requiredKeys.length > 0 ? (key: string) => requiredKeys.includes(key) : () => true;
+		const nextFn = (v: unknown): v is any => {
+			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+			if (!schema) return true;
+			const obj = v as any;
+			for (const key of Object.keys(schema)) {
+				const value = obj[key];
+				if (isRequiredKey(key)) {
 					if (value === undefined || !(schema as any)[key](value)) return false;
 				} else {
 					if (value !== undefined && !(schema as any)[key](value)) return false;
@@ -104,7 +175,7 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		return {
 			fn: nextFn,
 			meta: {
-				name: `${target.meta.name}.partial(${requiredKeys.length > 0 ? requiredKeys.join(', ') : ''})`,
+				name: `${target.meta.name}.required(${requiredKeys.length > 0 ? requiredKeys.join(', ') : ''})`,
 				shape: schema || {},
 			},
 		};
@@ -134,7 +205,7 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 			meta: { name: `${target.meta.name}.pick(${keys.join(', ')})`, shape: nextSchema },
 			transform,
 		};
-	}),
+	}) as any,
 	omit: transformer<any, any, [string[]], ObjectHelpers<any>>((target, keys: string[]) => {
 		const schema = target.meta.shape;
 		const nextSchema = schema ? Object.fromEntries(Object.entries(schema).filter(([k]) => !keys.includes(k))) : {};
@@ -160,7 +231,7 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 			meta: { name: `${target.meta.name}.omit(${keys.join(', ')})`, shape: nextSchema },
 			transform,
 		};
-	}),
+	}) as any,
 	extend: transformer<any, any, [Record<string, Guard<any>>], ObjectHelpers<any>>(
 		(target, extension: Record<string, Guard<any>>) => {
 			const schema = target.meta.shape ?? {};
@@ -222,6 +293,23 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		};
 		return { fn: nextFn, meta: { name: `${target.meta.name}.catchall(${catchall.meta.name})` } };
 	}),
+	keyof: property(
+		transformer<any, any, [], any>(target => {
+			const shape = target.meta.shape;
+			const keys = shape ? Object.keys(shape) : [];
+			return {
+				fn: EnumGuardFactory(keys),
+				meta: { name: `keyof<${keys.join(' | ')}>`, id: 'enum', values: new Set(keys) },
+				replaceHelpers: true,
+			};
+		})
+	) as any,
+	readonly: property(
+		transformer<any, any, [], ObjectHelpers<any>>(target => ({
+			fn: (v: unknown): v is any => target(Object.freeze(v)),
+			meta: { name: `${target.meta.name}.readonly` },
+		}))
+	) as any,
 
 	// --- Valuations ---
 
@@ -234,9 +322,24 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 	maxSize: factory<[number], any, ObjectHelpers<any>>(
 		(n: number) => (v: unknown) => typeof v === 'object' && v !== null && Object.keys(v).length <= n
 	),
-	has: factory<[string], any, ObjectHelpers<any>>(
-		(key: string) => (v: unknown) => typeof v === 'object' && v !== null && key in v
-	),
+	has: transformer<any, any, [string, Guard<any>?], ObjectHelpers<any>>((target, key: string, guard?: Guard<any>) => {
+		const schema = target.meta.shape ?? {};
+		const nextSchema = guard ? { ...schema, [key]: guard } : schema;
+		const nextFn = (v: unknown): v is any => {
+			if (!target(v)) return false;
+			if (typeof v !== 'object' || v === null) return false;
+			if (!(key in v)) return false;
+			if (guard && !guard((v as any)[key])) return false;
+			return true;
+		};
+		return {
+			fn: nextFn,
+			meta: {
+				name: `${target.meta.name}.has(${key}${guard ? `, ${guard.meta.name}` : ''})`,
+				shape: nextSchema,
+			},
+		};
+	}),
 	hasAll: factory<[string[]], any, ObjectHelpers<any>>(
 		(keys: string[]) => (v: unknown) => typeof v === 'object' && v !== null && keys.every(key => key in v)
 	),

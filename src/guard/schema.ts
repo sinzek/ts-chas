@@ -1,5 +1,5 @@
 /**
- * Schema module for the Guard API v2.
+ * Schema module for the Guard API.
  *
  * While individual guards have `.parse()` (single error, fail-fast) and `.assert()` (throws),
  * schemas provide **recursive error collection** — walking nested objects, arrays, and tuples
@@ -36,11 +36,18 @@
  * ```
  */
 
-import { ok, err, type Result } from '../result.js';
+import { ok, err, type Result } from '../result/result.js';
 import { GlobalErrs } from '../tagged-errs.js';
 import type { StandardSchemaV1 } from '../standard-schema.js';
 import { safeStringify } from '../utils.js';
-import type { Guard, GuardMeta, GuardType, GuardErr } from './shared.js';
+import {
+	type Guard,
+	type GuardMeta,
+	type InferGuard,
+	type GuardErr,
+	evaluateFallback,
+	evaluateError,
+} from './shared.js';
 
 /**
  * Extracts the validated output type from a schema, guard, or guard record.
@@ -59,10 +66,10 @@ import type { Guard, GuardMeta, GuardType, GuardErr } from './shared.js';
 export type InferSchema<T> =
 	T extends Schema<infer U>
 		? U
-		: T extends Guard<infer U, any>
-			? U
-			: T extends Record<string, Guard<any, any>>
-				? { [K in keyof T]: GuardType<T[K]> }
+		: T extends (...args: any[]) => any
+			? InferGuard<T>
+			: T extends Record<string, any>
+				? { [K in keyof T]: InferInput<T[K]> }
 				: never;
 
 /**
@@ -256,220 +263,206 @@ function buildErrMsg(meta: GuardMeta, v: unknown): string {
  * Recursively validates a value against a guard, descending into object shapes,
  * arrays, and tuples to collect ALL errors with full path tracking.
  */
+/**
+ * Recursively validates a value against a guard, descending into object shapes,
+ * arrays, and tuples to collect ALL errors with full path tracking.
+ *
+ * Returns the (possibly defaulted or transformed) value if no errors occurred
+ * at this node, or the original value if errors occurred (unless caught).
+ */
 function validateDeep(
 	value: unknown,
 	guard: Guard<any, any>,
 	schemaName: string,
 	path: string[],
 	errors: GuardErr[]
-): void {
+): any {
 	const meta = guard.meta;
 	const shape = meta.shape as Record<string, Guard<any, any>> | undefined;
+
+	// Helper to handle failure and apply defaults
+	const handleFailure = (currentValue: unknown, expectedType: string, customMsg?: string) => {
+		if ('fallback' in meta) {
+			return evaluateFallback(meta.fallback, meta, currentValue);
+		}
+
+		const message = evaluateError(meta.error, meta, currentValue, customMsg);
+
+		errors.push(
+			GlobalErrs.GuardErr({
+				name: meta.name,
+				message: message ?? buildErrMsg(meta, currentValue),
+				schema: schemaName,
+				path: [schemaName, ...path],
+				expected: expectedType,
+				actual: getType(currentValue),
+				values: meta.values,
+			})
+		);
+		return currentValue;
+	};
 
 	// ---- Object with shape: recurse into each field ----
 	if (shape && meta.id === 'object') {
 		if (value == null || typeof value !== 'object' || Array.isArray(value)) {
-			errors.push(
-				GlobalErrs.GuardErr({
-					name: meta.name,
-					message: meta.error ?? `Expected an object, but got ${getType(value)} (${safeStringify(value)})`,
-					schema: schemaName,
-					path: [schemaName, ...path],
-					expected: 'object',
-					actual: getType(value),
-				})
+			const message = evaluateError(
+				meta.error,
+				meta,
+				value,
+				`Expected an object, but got ${getType(value)} (${safeStringify(value)})`
 			);
-			return;
+			return handleFailure(value, 'object', message);
 		}
 
 		const obj = value as Record<string, unknown>;
+		const result: Record<string, any> = { ...obj };
+		let hasChanges = false;
+		const initialErrorCount = errors.length;
 
 		for (const [key, fieldGuard] of Object.entries(shape)) {
 			const fieldValue = obj[key];
 			const fieldPath = [...path, key];
 
-			if (!fieldGuard(fieldValue)) {
-				// if the field guard itself has a shape (nested object), recurse deeper
-				if (fieldGuard.meta.shape && typeof fieldValue === 'object' && fieldValue !== null) {
-					validateDeep(fieldValue, fieldGuard, schemaName, fieldPath, errors);
-				} else if (fieldGuard.meta.id === 'array' && Array.isArray(fieldValue)) {
-					// array field — check if we can recurse into elements
-					validateDeep(fieldValue, fieldGuard, schemaName, fieldPath, errors);
-				} else if (fieldGuard.meta.id === 'tuple' && Array.isArray(fieldValue)) {
-					validateDeep(fieldValue, fieldGuard, schemaName, fieldPath, errors);
-				} else {
-					errors.push(
-						GlobalErrs.GuardErr({
-							name: fieldGuard.meta.name,
-							message: fieldGuard.meta.error ?? buildErrMsg(fieldGuard.meta, fieldValue),
-							schema: schemaName,
-							path: [schemaName, ...fieldPath],
-							expected: fieldGuard.meta.id,
-							actual: getType(fieldValue),
-							values: fieldGuard.meta.values,
-						})
-					);
-				}
+			const validated = validateDeep(fieldValue, fieldGuard, schemaName, fieldPath, errors);
+			if (validated !== fieldValue) {
+				result[key] = validated;
+				hasChanges = true;
 			}
 		}
 
-		// also check for any non-field-level refinements on the object guard itself
-		// (e.g., .strict, .minSize) that pass the field-by-field check but fail overall
-		// we do this by checking if all fields passed but the guard itself fails
-		const allFieldsPassed = Object.entries(shape).every(([key, fg]) => fg((value as any)[key]));
-		if (allFieldsPassed && !guard(value)) {
-			errors.push(
-				GlobalErrs.GuardErr({
-					name: meta.name,
-					message: meta.error ?? buildErrMsg(meta, value),
-					schema: schemaName,
-					path: [schemaName, ...path],
-					expected: meta.id,
-					actual: getType(value),
-				})
-			);
+		// Also check for any non-field-level refinements on the object guard itself
+		const allFieldsPassed = errors.length === initialErrorCount;
+		if (allFieldsPassed && !guard(result)) {
+			return handleFailure(result, meta.id);
 		}
-		return;
+
+		return hasChanges ? result : value;
 	}
 
+	// ---- Array: recurse into elements if they have guards ----
 	if (meta.id === 'array' && Array.isArray(value)) {
-		// the guard tracks its element guards via the closure, but we can detect
-		// element-level failures by testing each element if the overall guard fails.
-		// if no meta.elementGuards, we fall back to a single error.
 		const elementGuards: Guard<any, any>[] | undefined = meta['elementGuards'];
 
 		if (elementGuards && elementGuards.length > 0) {
-			const elementCheck = (v: unknown) => elementGuards.some(g => g(v));
+			const result: any[] = [...value];
+			let hasChanges = false;
+			const initialErrorCount = errors.length;
 
-			let hasElementErrors = false;
 			for (let i = 0; i < value.length; i++) {
-				if (!elementCheck(value[i])) {
-					hasElementErrors = true;
-					const elemPath = [...path, `[${i}]`];
-					// try to give the best error from the first element guard
-					const firstGuard = elementGuards[0]!;
-					errors.push(
-						GlobalErrs.GuardErr({
-							name: firstGuard.meta.name,
-							message: firstGuard.meta.error ?? buildErrMsg(firstGuard.meta, value[i]),
-							schema: schemaName,
-							path: [schemaName, ...elemPath],
-							expected: elementGuards.map(g => g.meta.id).join(' | '),
-							actual: getType(value[i]),
-						})
-					);
-				}
-			}
+				const elemPath = [...path, `[${i}]`];
+				// For simple elements in a union array, we just find the first guard that passes
+				// or use the first guard to report errors if none pass.
+				const passingGuard = elementGuards.find(g => g(value[i]));
 
-			if (!hasElementErrors && !guard(value)) {
-				errors.push(
-					GlobalErrs.GuardErr({
-						name: meta.name,
-						message: meta.error ?? buildErrMsg(meta, value),
-						schema: schemaName,
-						path: [schemaName, ...path],
-						expected: meta.id,
-						actual: getType(value),
-					})
-				);
-			}
-		} else {
-			errors.push(
-				GlobalErrs.GuardErr({
-					name: meta.name,
-					message: meta.error ?? buildErrMsg(meta, value),
-					schema: schemaName,
-					path: [schemaName, ...path],
-					expected: meta.id,
-					actual: getType(value),
-				})
-			);
-		}
-		return;
-	}
-
-	if (meta.id === 'tuple' && Array.isArray(value)) {
-		const tupleGuards: Guard<any, any>[] | undefined = meta['tupleGuards'];
-
-		if (tupleGuards) {
-			if (value.length !== tupleGuards.length) {
-				errors.push(
-					GlobalErrs.GuardErr({
-						name: meta.name,
-						message: `Expected tuple of length ${tupleGuards.length}, but got length ${value.length}`,
-						schema: schemaName,
-						path: [schemaName, ...path],
-						expected: meta.id,
-						actual: getType(value),
-					})
-				);
-				return;
-			}
-
-			for (let i = 0; i < tupleGuards.length; i++) {
-				const elemGuard = tupleGuards[i]!;
-				if (!elemGuard(value[i])) {
-					const elemPath = [...path, `[${i}]`];
-					if (elemGuard.meta.shape && typeof value[i] === 'object' && value[i] !== null) {
-						validateDeep(value[i], elemGuard, schemaName, elemPath, errors);
-					} else {
-						errors.push(
-							GlobalErrs.GuardErr({
-								name: elemGuard.meta.name,
-								message: elemGuard.meta.error ?? buildErrMsg(elemGuard.meta, value[i]),
-								schema: schemaName,
-								path: [schemaName, ...elemPath],
-								expected: elemGuard.meta.id,
-								actual: getType(value[i]),
-							})
-						);
+				if (passingGuard) {
+					const validated = validateDeep(value[i], passingGuard, schemaName, elemPath, errors);
+					if (validated !== value[i]) {
+						result[i] = validated;
+						hasChanges = true;
+					}
+				} else {
+					// None of the element guards passed, use the first one to recurse/report
+					const validated = validateDeep(value[i], elementGuards[0]!, schemaName, elemPath, errors);
+					if (validated !== value[i]) {
+						result[i] = validated;
+						hasChanges = true;
 					}
 				}
 			}
-		} else {
-			errors.push(
-				GlobalErrs.GuardErr({
-					name: meta.name,
-					message: meta.error ?? buildErrMsg(meta, value),
-					schema: schemaName,
-					path: [schemaName, ...path],
-					expected: meta.id,
-					actual: getType(value),
-				})
-			);
+
+			if (errors.length === initialErrorCount && !guard(result)) {
+				return handleFailure(result, meta.id);
+			}
+
+			return hasChanges ? result : value;
 		}
-		return;
+
+		if (!guard(value)) {
+			return handleFailure(value, meta.id);
+		}
+		return value;
 	}
 
-	if (!guard(value)) {
-		errors.push(
-			GlobalErrs.GuardErr({
-				name: meta.name,
-				message: meta.error ?? buildErrMsg(meta, value),
-				schema: schemaName,
-				path: [schemaName, ...path],
-				expected: meta.id,
-				actual: getType(value),
-			})
-		);
+	// ---- Tuple: recurse into positional elements ----
+	if (meta.id === 'tuple' && Array.isArray(value)) {
+		const tupleGuards: Guard<any, any>[] | undefined = meta['tupleGuards'];
+		const restGuard: Guard<any, any> | undefined = meta['restGuard'];
+
+		if (tupleGuards) {
+			if (restGuard ? value.length < tupleGuards.length : value.length !== tupleGuards.length) {
+				const expected = restGuard ? `at least ${tupleGuards.length}` : `${tupleGuards.length}`;
+				return handleFailure(
+					value,
+					meta.id,
+					`Expected tuple of length ${expected}, but got length ${value.length}`
+				);
+			}
+
+			const result = [...value];
+			let hasChanges = false;
+			const initialErrorCount = errors.length;
+
+			for (let i = 0; i < tupleGuards.length; i++) {
+				const elemPath = [...path, `[${i}]`];
+				const validated = validateDeep(value[i], tupleGuards[i]!, schemaName, elemPath, errors);
+				if (validated !== value[i]) {
+					result[i] = validated;
+					hasChanges = true;
+				}
+			}
+
+			if (restGuard) {
+				for (let i = tupleGuards.length; i < value.length; i++) {
+					const elemPath = [...path, `[${i}]`];
+					const validated = validateDeep(value[i], restGuard, schemaName, elemPath, errors);
+					if (validated !== value[i]) {
+						result[i] = validated;
+						hasChanges = true;
+					}
+				}
+			}
+
+			if (errors.length === initialErrorCount && !guard(result)) {
+				return handleFailure(result, meta.id);
+			}
+
+			return hasChanges ? result : value;
+		}
+
+		if (!guard(value)) {
+			return handleFailure(value, meta.id);
+		}
+		return value;
 	}
+
+	// ---- Base Case: check the guard directly ----
+	if (!guard(value)) {
+		return handleFailure(value, meta.id);
+	}
+
+	// If it passes, we should still apply the root transform if it exists
+	return meta.transform ? meta.transform(value, value) : value;
 }
 
 /**
  * Input to `defineSchemas`: either a Guard directly, or a plain record of guards
  * (which will be wrapped in an implicit object schema).
  */
-type SchemaInput = Guard<any, any> | Record<string, Guard<any, any>>;
+type SchemaInputValue = Guard<any, any> | { [key: string]: SchemaInputValue };
+type SchemaInput = Guard<any, any> | Record<string, SchemaInputValue>;
 
 /**
- * Resolves a `SchemaInput` to its inferred TypeScript type.
+ * Resolves a `SchemaInput` (or nested value) to its inferred TypeScript type.
+ *
+ * Uses `InferGuard<T>` (which infers from the callable signature alone) instead of
+ * `Guard<infer U, any>` to avoid inference failure caused by T appearing in both
+ * covariant and contravariant positions in the full Guard intersection type.
  */
-type InferInput<T extends SchemaInput> =
-	T extends Guard<infer U, any>
-		? U
-		: T extends Record<string, Guard<any, any>>
-			? { [K in keyof T]: GuardType<T[K]> }
-			: never;
+export type InferInput<T> = T extends (...args: any[]) => any
+	? InferGuard<T>
+	: T extends Record<string, any>
+		? { [K in keyof T]: InferInput<T[K]> }
+		: never;
 
 /**
  * Defines named schemas with recursive validation and error collection.
@@ -492,6 +485,23 @@ type InferInput<T extends SchemaInput> =
  * // Both produce the same result:
  * type User = InferSchema<typeof schemas.User>;
  * // { name: string; age: number }
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Nested plain records
+ * const schemas = defineSchemas({
+ *   User: {
+ *     name: is.string,
+ *     address: {
+ *       street: is.string,
+ *       city: is.string,
+ *     },
+ *   },
+ * });
+ *
+ * type User = InferSchema<typeof schemas.User>;
+ * // { name: string; address: { street: string; city: string } }
  * ```
  */
 export function defineSchemas<S extends Record<string, SchemaInput>>(
@@ -531,17 +541,27 @@ export function defineSchema<T extends SchemaInput>(name: string, input: T): Sch
 // ---------------------------------------------------------------------------
 
 /**
- * If the input is already a Guard, return it.
- * If it's a plain record of guards, wrap it in an implicit object guard.
+ * Checks if a value is a Guard (function with `.meta`).
  */
-function resolveGuard(input: SchemaInput): Guard<any, any> {
-	if (typeof input === 'function' && 'meta' in input) {
-		return input as Guard<any, any>;
+function isGuard(v: unknown): v is Guard<any, any> {
+	return typeof v === 'function' && 'meta' in v;
+}
+
+/**
+ * If the input is already a Guard, return it.
+ * If it's a plain record, recursively resolve nested records into object guards.
+ */
+function resolveGuard(input: SchemaInput | SchemaInputValue): Guard<any, any> {
+	if (isGuard(input)) {
+		return input;
 	}
-	// Plain record of guards — build an object guard inline
-	// We import dynamically to avoid circular deps, but since this is just
-	// creating a simple validation fn, we can do it inline:
-	const shape = input as Record<string, Guard<any, any>>;
+	// Plain record — recursively resolve each value, then build an object guard
+	const record = input as Record<string, SchemaInputValue>;
+	const shape: Record<string, Guard<any, any>> = {};
+	for (const [key, value] of Object.entries(record)) {
+		shape[key] = resolveGuard(value);
+	}
+
 	const names = Object.keys(shape)
 		.map(k => `${k}: ${shape[k]!.meta.name}`)
 		.join(', ');
@@ -578,11 +598,10 @@ function buildSchema<T>(name: string, guard: Guard<T, any>): Schema<T> {
 	const schema: Schema<T> = {
 		parse(value: unknown): Result<T, GuardErr[]> {
 			const errors: GuardErr[] = [];
-			validateDeep(value, guard, name, [], errors);
+			const result = validateDeep(value, guard, name, [], errors);
 
 			if (errors.length === 0) {
-				const transformed = guard.meta.transform?.(value, value) ?? value;
-				return ok(transformed as T);
+				return ok(result as T);
 			}
 			return err(errors);
 		},

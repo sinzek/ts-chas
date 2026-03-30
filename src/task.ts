@@ -1,17 +1,12 @@
+import { errAsync, ResultAsync, type Result, err, ok } from './result/result.js';
+import type { UnwrapErr } from './result/shared.js';
 import {
-	errAsync,
 	fromPromise,
-	ResultAsync,
-	type Result,
 	go,
-	type UnwrapErr,
-	err,
 	allAsync as resultAllAsync,
 	anyAsync as resultAnyAsync,
 	collectAsync as resultCollectAsync,
-	ok,
-} from './result.js';
-
+} from './result/result-helpers.js';
 import { type Option } from './option.js';
 import type { CatchTag, CatchTarget, ExtractErrorFromTarget } from './utils.js';
 

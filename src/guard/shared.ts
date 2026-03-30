@@ -1,6 +1,7 @@
-import { ok, err, type Result } from '../result.js';
+import { ok, err, type Result } from '../result/result.js';
 import { GlobalErrs, type InferErr } from '../tagged-errs.js';
 import { deepEqual, safeStringify } from '../utils.js';
+import type { StandardSchemaV1 } from '../standard-schema.js';
 
 /**
  * A tagged error produced when guard validation fails.
@@ -62,7 +63,7 @@ export type GuardMeta = {
 	 * A custom error message set via `.err()`.
 	 * When present, this overrides the default auto-generated message in `.parse()` and `.assert()`.
 	 */
-	error?: string | undefined;
+	error?: string | ((ctx: { meta: GuardMeta; value: unknown }) => string) | undefined;
 	/**
 	 * A stable identifier for the guard's base type (e.g. `'string'`, `'number'`, `'object'`).
 	 *
@@ -89,6 +90,13 @@ export type GuardMeta = {
 	 */
 	values?: Set<any> | undefined;
 	/**
+	 * The default value (or a function returning one) to use when parsing fails.
+	 *
+	 * NOTE: A fallback does not change the behavior of the guard when used as a boolean type predicate
+	 * in `if` statements.
+	 */
+	fallback?: any | ((ctx: { meta: GuardMeta; value: unknown }) => any) | undefined;
+	/**
 	 * A transformation function applied to the validated value before passing it
 	 * to subsequent helpers in the chain. Composed sequentially by `createProxy`
 	 * when multiple transformers are chained.
@@ -108,16 +116,16 @@ export type GuardMeta = {
  *
  * @example
  * ```ts
- * type S = GuardType<typeof is.string>;         // string
- * type N = GuardType<typeof is.number.positive>; // number
+ * type S = InferGuard<typeof is.string>;         // string
+ * type N = InferGuard<typeof is.number.positive>; // number
  *
  * const UserGuard = is.object({ name: is.string, age: is.number });
- * type User = GuardType<typeof UserGuard>; // { name: string; age: number }
+ * type User = InferGuard<typeof UserGuard>; // { name: string; age: number }
  * ```
  */
-export type GuardType<T> = T extends (value: unknown) => value is infer U ? U : never;
+export type InferGuard<T> = T extends (value: unknown) => value is infer U ? U : never;
 
-type Brand<Tag extends string, Base> = Base & { readonly __brand: Tag };
+export type Brand<Tag extends string, Base> = Base & { readonly __brand: Tag };
 
 // ---------------------------------------------------------------------------
 // Guard type
@@ -158,15 +166,38 @@ type Brand<Tag extends string, Base> = Base & { readonly __brand: Tag };
  * );
  * ```
  */
-export type Guard<T, H extends Record<string, any> = {}> = {
+export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unknown, T> & {
 	(value: unknown): value is T;
+	/**
+	 * An easy way to infer a guard's output/expected type.
+	 * @example
+	 * ```ts
+	 * const guard = is.string;
+	 * const type: typeof guard.$infer = 'hello';
+	 * ```
+	 */
+	$infer: T;
+	/**
+	 * Contains the guard's identity, the full chain name, error configuration, etc.
+	 *
+	 * Custom metadata can be attached via the index signature and accessed
+	 * with bracket notation (e.g. `guard.meta['myField']`).
+	 *
+	 * @example
+	 * ```ts
+	 * const guard = is.string.trim().email.err('Invalid email');
+	 * guard.meta.name;  // 'trimmed string.email'
+	 * guard.meta.id;    // 'string'
+	 * guard.meta.error; // 'Invalid email'
+	 * ```
+	 */
 	meta: GuardMeta;
 	/**
 	 * Adds a custom error message to the guard that will be used when parsing fails.
 	 * @param msg The error message or a function that returns one.
 	 * @returns A new guard with the error message.
 	 */
-	error: (msg: string | ((meta: GuardMeta) => string)) => Guard<T, H>;
+	error: (msg: string | ((ctx: { meta: GuardMeta; value: unknown }) => string)) => Guard<T, H>;
 	/**
 	 * Adds a brand to the guard.
 	 * @param tag The tag to add to the guard.
@@ -243,6 +274,30 @@ export type Guard<T, H extends Record<string, any> = {}> = {
 	 */
 	nullish: Guard<T | null | undefined>;
 	/**
+	 * Wraps the guard to validate arrays where every element matches.
+	 * Equivalent to `is.array(thisGuard)`.
+	 *
+	 * `is.string.array` → `Guard<string[], ArrayHelpers<string>>`
+	 * `is.number.positive.array` → `Guard<number[], ArrayHelpers<number>>`
+	 */
+	array: Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Sets a fallback value (or a function that returns one) to use when validation fails.
+	 *
+	 * When a guard has a fallback, `.parse()` and `.assert()` will return the fallback
+	 * value instead of an error if the input is invalid. This also works recursively
+	 * in schemas--nested properties with fallbacks will be auto-populated.
+	 *
+	 * > [!IMPORTANT]
+	 * > This does **not** change the behavior of the guard when used as a boolean type predicate
+	 * > (e.g. in `if (guard(v))`). The predicate still returns `false` if the input is invalid,
+	 * > as it cannot safely narrow the type of the original variable to include the fallback.
+	 *
+	 * @param value - The fallback value OR a function `(ctx) => T`.
+	 * @returns A new guard with the fallback configured.
+	 */
+	fallback: (value: T | ((ctx: { meta: GuardMeta; value: unknown }) => T)) => Guard<T, H>;
+	/**
 	 * Applies a transformation to the validated value. The guard still validates
 	 * the original input, but `.parse()` and `.assert()` return the transformed value.
 	 *
@@ -293,9 +348,6 @@ export type Guard<T, H extends Record<string, any> = {}> = {
 	refine: (fn: (value: T) => T) => Guard<T, H>;
 } & H;
 
-// ---------------------------------------------------------------------------
-// Helper classification symbols
-// ---------------------------------------------------------------------------
 //
 // The proxy uses these symbols to decide how to compose each helper with the
 // parent guard. There are five categories:
@@ -330,35 +382,6 @@ export const TRANSFORMER = Symbol('transformer');
 export const TERMINAL = Symbol('terminal');
 /** @internal Symbol that marks a helper as a property-style access. */
 export const PROPERTY = Symbol('property');
-/**
- * @internal Symbol for dual-mode guards that act as both predicates and factories.
- *
- * When a guard has a `[DUAL_FACTORY]` function, the proxy's `apply` trap calls it
- * with the arguments array. If the factory returns a value (non-undefined), that
- * value is returned instead of the predicate result. If it returns `undefined`,
- * the guard falls back to predicate mode.
- *
- * Used by `is.result` and `is.option` to support overloaded call signatures:
- * - `is.result(value)` — predicate mode, returns boolean
- * - `is.result(okGuard, errGuard)` — factory mode, returns a narrowed guard
- */
-export const DUAL_FACTORY = Symbol('dualFactory');
-
-/**
- * Checks whether a value looks like a Guard (function with `.meta.name` and `.meta.id`).
- * Used by the dual factory mechanism to distinguish guard arguments from regular values.
- * @internal
- */
-export function isGuardLike(v: unknown): v is Guard<any, any> {
-	return (
-		typeof v === 'function' &&
-		'meta' in v &&
-		typeof (v as any).meta === 'object' &&
-		(v as any).meta !== null &&
-		'name' in (v as any).meta &&
-		'id' in (v as any).meta
-	);
-}
 
 // ---------------------------------------------------------------------------
 // Helper authoring utilities
@@ -647,50 +670,85 @@ export function makeGuard<T, H extends Record<string, any> = {}>(
 	return createProxy(guard, helpers ?? ({} as H)) as Guard<T, H>;
 }
 
-// ---------------------------------------------------------------------------
-// Universal helpers — shared by all guards
-// ---------------------------------------------------------------------------
+/** @internal Evaluates a fallback (static value or function). */
+export function evaluateFallback(fallback: any, meta: GuardMeta, value: unknown): any {
+	if (typeof fallback === 'function') {
+		return fallback({ meta, value });
+	}
+	return fallback;
+}
 
+/** @internal Evaluates an error message (static string or function). */
+export function evaluateError(
+	error: string | ((ctx: { meta: GuardMeta; value: unknown }) => string) | undefined,
+	meta: GuardMeta,
+	value: unknown,
+	customMsg?: string | ((meta: GuardMeta) => string) | undefined
+): string | undefined {
+	if (typeof customMsg === 'function') {
+		customMsg = customMsg(meta);
+	}
+	if (customMsg) return customMsg;
+	if (typeof error === 'function') {
+		return error({ meta, value });
+	}
+	return error;
+}
+
+// defined here to allow both is.array and the universal .array helper to use them
+export interface ArrayHelpers<T> {
+	nonEmpty: Guard<T[], ArrayHelpers<T>>;
+	empty: Guard<T[], ArrayHelpers<T>>;
+	unique: Guard<T[], ArrayHelpers<T>>;
+	min: (n: number) => Guard<T[], ArrayHelpers<T>>;
+	max: (n: number) => Guard<T[], ArrayHelpers<T>>;
+	size: (n: number) => Guard<T[], ArrayHelpers<T>>;
+	includes: (item: T) => Guard<T[], ArrayHelpers<T>>;
+	excludes: (item: T) => Guard<T[], ArrayHelpers<T>>;
+	readonly: Guard<Readonly<T[]>, ArrayHelpers<T>>;
+}
+
+export const arrayHelpers: ArrayHelpers<any> = {
+	nonEmpty: ((v: unknown) => Array.isArray(v) && v.length > 0) as any,
+	empty: ((v: unknown) => Array.isArray(v) && v.length === 0) as any,
+	unique: ((v: unknown) => Array.isArray(v) && new Set(v as any[]).size === (v as any[]).length) as any,
+	min: factory<[number], any, ArrayHelpers<Record<string, any>>>(
+		(n: number) => (v: unknown) => Array.isArray(v) && v.length >= n
+	),
+	max: factory<[number], any, ArrayHelpers<Record<string, any>>>(
+		(n: number) => (v: unknown) => Array.isArray(v) && v.length <= n
+	),
+	size: factory<[number], any, ArrayHelpers<Record<string, any>>>(
+		(n: number) => (v: unknown) => Array.isArray(v) && v.length === n
+	),
+	includes: factory<[unknown], any, ArrayHelpers<Record<string, any>>>(
+		(item: unknown) => (v: unknown) => Array.isArray(v) && v.includes(item)
+	),
+	excludes: factory<[unknown], any, ArrayHelpers<Record<string, any>>>(
+		(item: unknown) => (v: unknown) => Array.isArray(v) && !v.includes(item)
+	),
+	readonly: property(
+		transformer(target => ({
+			fn: (v: unknown): v is any => target(Object.freeze(v)),
+			meta: { name: `${target.meta.name}.readonly` },
+		})) as any
+	),
+};
+
+// Shared by all guards
 const universalHelpers: Record<string, any> = {
-	/**
-	 * Adds a custom error message to the guard that will be used when parsing fails.
-	 * Allows for dynamic error messages based on the guard's metadata.
-	 */
-	err: transformer((target, msg: string | ((meta: GuardMeta) => string)) => {
-		const error = typeof msg === 'function' ? msg(target.meta) : msg;
+	error: transformer((target, msg: string | ((ctx: { meta: GuardMeta; value: unknown }) => string)) => {
 		return {
 			fn: (v: unknown): v is any => target(v),
-			meta: { error },
+			meta: { error: msg },
 		};
 	}),
 
-	/**
-	 * Adds a brand to the guard (modifies the type).
-	 *
-	 * @example
-	 * ```typescript
-	 * const isEmail = is.string.brand('email');
-	 * // isEmail is now of type Guard<Brand<'email', string>>
-	 * ```
-	 */
 	brand: transformer(<Tag extends string, T, H extends Record<string, any>>(target: Guard<T, H>, tag: Tag) => ({
 		fn: (v: unknown): v is Brand<Tag, T> => target(v),
 		meta: { name: `${target.meta.name}.brand<${tag}>` },
 	})),
 
-	/**
-	 * Parses a value using the guard.
-	 *
-	 * @example
-	 * ```typescript
-	 * const result = is.string.parse('hello', 'Error: this is a custom error message!');
-	 * // result is Ok('hello')
-	 * const result = is.string.parse(123);
-	 * // result is Err(GuardErr { message: 'Expected string, but got number (123)' })
-	 * const result = is.string.where(v => v.length > 5).parse('hello');
-	 * // result is Err(GuardErr { message: 'Value "hello" failed validation' })
-	 * ```
-	 */
 	parse: terminal(
 		(
 			target: Guard<any, Record<string, any>>,
@@ -698,7 +756,12 @@ const universalHelpers: Record<string, any> = {
 			errMsg?: string | ((meta: GuardMeta) => string)
 		): Result<any, GuardErr> => {
 			if (target(value)) return ok(target.meta.transform ? target.meta.transform(value, value) : value);
-			const message = typeof errMsg === 'function' ? errMsg(target.meta) : (errMsg ?? target.meta.error);
+
+			if ('fallback' in target.meta) {
+				return ok(evaluateFallback(target.meta.fallback, target.meta, value));
+			}
+
+			const message = evaluateError(target.meta.error, target.meta, value, errMsg);
 			return GlobalErrs.GuardErr.err({
 				message: message ?? buildGuardErrMsg(target.meta, value),
 				path: target.meta.path,
@@ -710,19 +773,6 @@ const universalHelpers: Record<string, any> = {
 		}
 	),
 
-	/**
-	 * Asserts that the value is valid according to the guard and returns the coerced value.
-	 *
-	 * @example
-	 * ```typescript
-	 * const result = is.string.assert('hello', 'Error: this is a custom error message!');
-	 * // result is 'hello'
-	 * const result = is.string.assert(123);
-	 * // throws GuardErr { message: 'Expected string, but got number (123)' }
-	 * const result = is.string.where(v => v.length > 5).assert('hello');
-	 * // throws GuardErr { message: 'Value "hello" failed validation' }
-	 * ```
-	 */
 	assert: terminal(
 		<T>(
 			target: Guard<T, Record<string, any>>,
@@ -730,7 +780,12 @@ const universalHelpers: Record<string, any> = {
 			errMsg?: string | ((meta: GuardMeta) => string)
 		): T => {
 			if (target(value)) return target.meta.transform?.(value, value) ?? value;
-			const message = typeof errMsg === 'function' ? errMsg(target.meta) : (errMsg ?? target.meta.error);
+
+			if ('fallback' in target.meta) {
+				return evaluateFallback(target.meta.fallback, target.meta, value);
+			}
+
+			const message = evaluateError(target.meta.error, target.meta, value, errMsg);
 			throw GlobalErrs.GuardErr.err({
 				message: message ?? buildGuardErrMsg(target.meta, value),
 				path: target.meta.path,
@@ -742,15 +797,6 @@ const universalHelpers: Record<string, any> = {
 		}
 	),
 
-	/**
-	 * Adds a condition to the guard that must be met for the value to be considered valid.
-	 *
-	 * @example
-	 * ```typescript
-	 * const result = is.string.where((v) => v.length > 5).parse('hello');
-	 * // Err(GuardErr { message: 'Value "hello" failed validation' })
-	 * ```
-	 */
 	where: transformer((target, predicate: (value: any) => boolean) => ({
 		fn: (v: unknown): v is any => {
 			if (!target(v)) return false;
@@ -821,14 +867,27 @@ const universalHelpers: Record<string, any> = {
 		}))
 	),
 
-	/**
-	 * Applies a transformation to the validated value.
-	 * The guard still validates the original input using the parent chain,
-	 * but `.parse()` / `.assert()` return the transformed value,
-	 * and subsequent chain steps operate on the transformed value.
-	 *
-	 * Drops type-specific helpers since the output type may have changed.
-	 */
+	fallback: transformer((target, value: any) => ({
+		fn: (v: unknown): v is any => target(v),
+		meta: {
+			name: `${target.meta.name}.fallback(${typeof value === 'function' ? 'fn' : safeStringify(value)})`,
+			fallback: value,
+		},
+	})),
+
+	array: property(
+		transformer((target: Guard<any, Record<string, any>>) => ({
+			fn: (v: unknown): v is any[] => Array.isArray(v) && v.every(item => target(item)),
+			meta: {
+				name: `${target.meta.name}[]`,
+				id: 'array',
+				elementGuards: [target],
+			},
+			helpers: arrayHelpers,
+			replaceHelpers: true,
+		}))
+	),
+
 	transform: transformer((target: Guard<any, Record<string, any>>, fn: (value: any) => any) => ({
 		fn: (v: unknown): v is any => target(v),
 		meta: { name: `${target.meta.name}.transform(fn)` },
@@ -837,10 +896,6 @@ const universalHelpers: Record<string, any> = {
 		replaceHelpers: true,
 	})),
 
-	/**
-	 * Applies a same-type transformation, preserving type-specific helpers.
-	 * Use for normalizations where the type doesn't change (trim, clamp, round, etc.).
-	 */
 	refine: transformer((target: Guard<any, Record<string, any>>, fn: (value: any) => any) => ({
 		fn: (v: unknown): v is any => target(v),
 		meta: { name: `${target.meta.name}.refine(fn)` },
@@ -908,17 +963,60 @@ export function createProxy<T, H extends Record<string, any>>(
 		},
 
 		get(target, prop: string) {
-			if (prop === 'meta') return target.meta;
+			if (prop === '$infer') {
+				throw GlobalErrs.ChasErr({
+					message:
+						`[ts-chas] The .infer property is a type-level helper and cannot be accessed at runtime. ` +
+						`Use it only with 'typeof' (e.g., type T = typeof guard.infer).`,
+					origin: 'infer',
+				});
+			}
 			if (prop === 'helpers') return helpers;
+
+			if (prop === 'meta') return target.meta;
+
+			if (prop === '~standard') {
+				return {
+					version: 1,
+					vendor: 'chas',
+					validate: (v: unknown): StandardSchemaV1.Result<T> => {
+						if (target(v)) {
+							const val = target.meta.transform ? target.meta.transform(v, v) : v;
+							return { value: val as T };
+						}
+
+						if ('fallback' in target.meta) {
+							return { value: evaluateFallback(target.meta.fallback, target.meta, v) as T };
+						}
+
+						const message = evaluateError(target.meta.error, target.meta, v);
+						return {
+							issues: [
+								{
+									message: message ?? buildGuardErrMsg(target.meta, v),
+									path: target.meta.path,
+								},
+							],
+						};
+					},
+				};
+			}
 
 			// Universal methods (terminal)
 			if (prop === 'parse') {
 				return (v: unknown) => {
 					if (target(v)) return ok((target.meta.transform ? target.meta.transform(v, v) : v) as T);
+
+					if ('fallback' in target.meta) {
+						return ok(evaluateFallback(target.meta.fallback, target.meta, v) as T);
+					}
+
+					const message = evaluateError(target.meta.error, target.meta, v);
+
 					return err(
 						GlobalErrs.GuardErr({
 							name: target.meta.name,
-							message: target.meta.error ?? buildGuardErrMsg(target.meta, v),
+							message: message ?? buildGuardErrMsg(target.meta, v),
 							path: target.meta.path,
 							expected: target.meta.id,
 							actual: getType(v),
@@ -930,9 +1028,16 @@ export function createProxy<T, H extends Record<string, any>>(
 			if (prop === 'assert') {
 				return (v: unknown) => {
 					if (target(v)) return (target.meta.transform ? target.meta.transform(v, v) : v) as T;
+
+					if ('fallback' in target.meta) {
+						return evaluateFallback(target.meta.fallback, target.meta, v) as T;
+					}
+
+					const message = evaluateError(target.meta.error, target.meta, v);
+
 					throw GlobalErrs.GuardErr({
 						name: target.meta.name,
-						message: target.meta.error ?? buildGuardErrMsg(target.meta, v),
+						message: message ?? buildGuardErrMsg(target.meta, v),
 						path: target.meta.path,
 						expected: target.meta.id,
 						actual: getType(v),

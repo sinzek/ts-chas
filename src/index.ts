@@ -3,8 +3,3 @@
  * @module chas
  */
 export * as chas from './chas.js';
-
-/**
- * Named exports for direct access without the `chas` prefix.
- */
-export * from './chas.js';

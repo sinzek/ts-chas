@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { FACTORY, factory, makeGuard, type Guard } from '../shared.js';
+import { factory, makeGuard, type Guard } from '../shared.js';
 
 export interface SymbolGuard extends Guard<symbol, typeof symbolHelpers> {}
 

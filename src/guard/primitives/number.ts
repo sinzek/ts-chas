@@ -1,6 +1,7 @@
+import type { Brand } from '../shared.js';
 import { makeGuard, type Guard, factory } from '../shared.js';
 
-export interface NumberHelpers {
+interface NumberHelpers {
 	/** Validates that the number is greater than the minimum. */
 	gt: (min: number) => Guard<number, NumberHelpers>;
 	/** Validates that the number is greater than or equal to the minimum. */
@@ -65,10 +66,19 @@ const numberHelpers: NumberHelpers = {
 };
 
 export const NumberGuard: NumberGuard = makeGuard(
-	(v: unknown): v is number => typeof v === 'number' && Number.isFinite(v),
+	(v: unknown): v is number => typeof v === 'number' && !Number.isNaN(v) && Number.isFinite(v),
 	{
 		name: 'number',
 		id: 'number',
 	},
 	numberHelpers
 );
+
+type NaN = Brand<'NaN', number>; // type alias for number that is NaN
+
+export interface NaNGuard extends Guard<NaN> {}
+
+export const NaNGuard: NaNGuard = makeGuard((v: unknown): v is NaN => typeof v === 'number' && Number.isNaN(v), {
+	name: 'NaN',
+	id: 'NaN',
+});

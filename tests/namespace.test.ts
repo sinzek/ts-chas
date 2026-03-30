@@ -1,17 +1,40 @@
 import { describe, it, expect } from 'vitest';
-import { chas, Result, ResultAsync, Option, Task, is, TaggedErrs, Guard } from '../src/index.js';
+import { chas } from '../src/index.js';
+import {
+	ok,
+	err,
+	all,
+	tryCatch,
+	okAsync,
+	fromSafePromise,
+	Task,
+	is,
+	type Option,
+	Result,
+	ResultAsync,
+	some,
+	none,
+	defineErrs,
+	matchErr,
+	matchErrAsync,
+	matchErrPartial,
+	matchErrPartialAsync,
+	isErrWithTag,
+	isAnyErrWithTag,
+	GlobalErrs,
+} from '../src/chas.js';
 
 describe('Namespace Structure', () => {
 	describe('Result Namespace', () => {
 		it('has ok and err', () => {
-			expect(Result.ok(1).unwrap()).toBe(1);
-			expect(Result.err('e').unwrapErr()).toBe('e');
+			expect(ok(1).unwrap()).toBe(1);
+			expect(err('e').unwrapErr()).toBe('e');
 		});
 
 		it('has utility methods', () => {
-			expect(Result.all([Result.ok(1)])).toBeDefined();
+			expect(all([ok(1)])).toBeDefined();
 			expect(
-				Result.tryCatch(
+				tryCatch(
 					() => 1,
 					() => 'e'
 				)
@@ -19,30 +42,30 @@ describe('Namespace Structure', () => {
 		});
 
 		it('has async aliases', () => {
-			expect(ResultAsync.ok(1)).toBeDefined();
+			expect(okAsync(1)).toBeDefined();
 		});
 
 		it('merges type and value', () => {
-			const r: Result<number, string> = Result.ok(1);
+			const r: Result<number, string> = ok(1);
 			expect(r.ok).toBe(true);
 		});
 	});
 
 	describe('ResultAsync Namespace (Class Statics)', () => {
 		it('has all static methods', () => {
-			expect(ResultAsync.ok(1)).toBeDefined();
-			expect(ResultAsync.fromSafePromise(Promise.resolve(1))).toBeDefined();
+			expect(okAsync(1)).toBeDefined();
+			expect(fromSafePromise(Promise.resolve(1))).toBeDefined();
 		});
 	});
 
 	describe('Option Namespace', () => {
 		it('has some and none', () => {
-			expect(Option.some(1).value).toBe(1);
-			expect(Option.none().isNone()).toBe(true);
+			expect(some(1).value).toBe(1);
+			expect(none().isNone()).toBe(true);
 		});
 
 		it('merges type and value', () => {
-			const o: Option<number> = Option.some(1);
+			const o: Option<number> = some(1);
 			expect(o.isSome()).toBe(true);
 		});
 	});
@@ -55,13 +78,14 @@ describe('Namespace Structure', () => {
 
 	describe('TaggedErrs Namespace', () => {
 		it('has match and define', () => {
-			expect(TaggedErrs.define).toBeDefined();
-			expect(TaggedErrs.match).toBeDefined();
-			expect(TaggedErrs.matchAsync).toBeDefined();
-			expect(TaggedErrs.matchPartial).toBeDefined();
-			expect(TaggedErrs.matchPartialAsync).toBeDefined();
-			expect(TaggedErrs.is).toBeDefined();
-			expect(TaggedErrs.isAny).toBeDefined();
+			expect(defineErrs).toBeDefined();
+			expect(matchErr).toBeDefined();
+			expect(matchErrAsync).toBeDefined();
+			expect(matchErrPartial).toBeDefined();
+			expect(matchErrPartialAsync).toBeDefined();
+			expect(isErrWithTag).toBeDefined();
+			expect(isAnyErrWithTag).toBeDefined();
+			expect(GlobalErrs).toBeDefined();
 		});
 	});
 
@@ -74,16 +98,7 @@ describe('Namespace Structure', () => {
 
 		it('still has named exports', () => {
 			expect(is).toBeDefined();
-			expect(Result).toBeDefined();
-		});
-	});
-
-	describe('Guard Namespace', () => {
-		it('has static methods', () => {
-			expect(Guard.assert).toBeDefined();
-			expect(Guard.ensure).toBeDefined();
-			expect(Guard.is).toBeDefined();
-			expect(Guard.is.taggedErr).toBeDefined();
+			expect(ResultAsync).toBeDefined();
 		});
 	});
 });

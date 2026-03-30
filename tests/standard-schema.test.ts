@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { is, defineSchemas, toStandardSchema } from '../src/guard.js';
-import type { StandardSchemaV1 } from '../src/standard-schema.js';
+import { is, defineSchemas } from '../src/guard/index.js';
 
 describe('Standard Schema Compliance', () => {
 	describe('guards have ~standard property', () => {
@@ -83,22 +82,6 @@ describe('Standard Schema Compliance', () => {
 			const result = std.validate({ name: 123, age: 'thirty' });
 			expect(result.issues).toBeDefined();
 			expect(result.issues.length).toBeGreaterThan(0);
-		});
-	});
-
-	describe('toStandardSchema', () => {
-		it('converts a guard to Standard Schema', () => {
-			const schema = toStandardSchema(is.string.email);
-			expect(schema['~standard']).toBeDefined();
-			expect(schema['~standard'].version).toBe(1);
-			expect(schema['~standard'].vendor).toBe('chas');
-		});
-
-		it('toStandardSchema validate works correctly', () => {
-			const schema = toStandardSchema(is.number.positive);
-			expect(schema['~standard'].validate(42)).toEqual({ value: 42 });
-			expect(schema['~standard'].validate(-1)).toHaveProperty('issues');
-			expect(schema['~standard'].validate('hello')).toHaveProperty('issues');
 		});
 	});
 });

@@ -1,13 +1,7 @@
-import { makeGuard, type Guard } from '../shared.js';
-
-/**
- * Infers the union of types from an array of guards.
- */
-export type InferUnion<T extends Guard<any, Record<string, any>>[]> =
-	T[number] extends Guard<infer U, Record<string, any>> ? U : never;
+import { makeGuard, type Guard, type InferGuard } from '../shared.js';
 
 export interface UnionGuardFactory {
-	<T extends Guard<any, Record<string, any>>[]>(...guards: T): Guard<InferUnion<T>, typeof unionHelpers>;
+	<T extends Guard<any, any>[]>(...guards: T): Guard<InferGuard<T[number]>, typeof unionHelpers>;
 }
 
 const unionHelpers = {};

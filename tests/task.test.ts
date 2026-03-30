@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Task } from '../src/task.js';
-import { errAsync, ResultAsync, ok, type Result, okAsync } from '../src/result.js';
+import { errAsync, ResultAsync, ok, type Result, okAsync } from '../src/result/index.js';
 
 describe('Task', () => {
 	it('creates a Task from a successful promise', async () => {
