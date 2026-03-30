@@ -18,12 +18,12 @@ At a high level, the `chas` ecosystem provides:
 
 ## Modules
 
-### 1. Result API (`chas/result`)
+### 1. Result API (`ts-chas/result`)
 
 Inspired by Rust and `fp-ts`, `Result<T, E>` and `ResultAsync<T, E>` replace implicit `try...catch` blocks with explicit, monadic error handling. ResultAsync is also PromiseLike, so it can be awaited or .then()'d directly.
 
 ```ts
-import { chas } from 'chas';
+import { chas } from 'ts-chas';
 
 // Predictable error typing
 function fetchUser(id: number): chas.ResultAsync<User, string> {
@@ -84,15 +84,15 @@ const result = chas.ok(1).pipe(add5, double); // Ok(12)
 const asyncResult = chas.okAsync(1).pipe(add5, double); // ResultAsync<12, never>
 ```
 
-### 2. Guard API (`chas/guard`)
+### 2. Guard API (`ts-chas/guard`)
 
 A highly expressive, chainable validation and schema parsing system. Heavily inspired by [Zod](https://zod.dev/), but with a focus on type inference and integration with the `chas` ecosystem.
 
 ```ts
-import { is, defineSchemas } from 'chas';
+import { is, defineSchemas, type InferSchema } from 'ts-chas/guard';
 
 // Simple, chainable runtime validation
-const isValidEmail = is.string.email.length(5, 100);
+const isValidEmail = is.string.trim().email.min(5);
 if (isValidEmail(someInput)) {
 	// someInput is correctly inferred as `string` here
 }
@@ -109,17 +109,17 @@ if (isValid) {
 	// data is correctly inferred as `User[]` here
 }
 
-// Schema parsing
+// Schema parsing (supports is.object schemas and base JS objects)
 const schemas = defineSchemas({
 	User: {
 		id: is.string.uuid('v4'),
-		age: is.number.gte(18).setErrMsg('Not old enough!'),
+		age: is.number.gte(18).error('Not old enough!'),
 		tags: is.array(is.string).min(1),
 	},
 });
 
 // Easily infer a schema's type
-type User = chas.InferSchema<typeof schemas.User>;
+type User = InferSchema<typeof schemas.User>;
 
 // Parses unknown data into a Result<{ id: string, age: number, tags: string[] }, GuardErr[]>
 const result = schemas.User.parse(unknownData);
@@ -131,31 +131,33 @@ if (result.isErr()) {
 const result = schemas.User.parse(unknownData);
 if (result.isErr()) {
 	console.error(result.error); // GuardErr[]
-	// [{ msg: 'User.name failed validation: expected string.uuid('v4'), but got number (123)', path: ['User', 'name'], expected: 'string', schema: 'User' },
-	// { msg: 'Not old enough!', path: ['User', 'age'], expected: 'number', schema: 'User' },
-	// { msg: 'User.email failed validation: expected string.email, but got undefined (undefined)', path: ['User', 'email'], expected: 'string', schema: 'User' }]
+	// [{ message: 'Expected string, but got number (123)', path: ['User', 'name'], expected: 'string', schema: 'User' },
+	// { message: 'Not old enough!', path: ['User', 'age'], expected: 'number', name: 'User' },
+	// { message: 'Expected string, but got undefined (undefined)', path: ['User', 'email'], expected: 'string', name: 'User' }]
 }
 ```
+
+> **Note:** All chains returned by `ts-chas/guard` natively implement the **[Standard Schema v1](https://github.com/standard-schema/standard-schema)** specification via the `~standard` property, meaning they can be seamlessly plugged into tRPC, react-hook-form, Drizzle, and other ecosystems.
 
 #### `is` Namespace Extensions
 
 The Guard API also allows for namespace extensions, allowing you to create custom validators on your own `is` instance.
 
 ```ts
-const myIs = is.extend('app', {
+const myIs = is.extend({
 	positiveEven: (v: unknown): v is number => is.number.positive(v) && is.number.even(v),
 });
 
-myIs.app.positiveEven(4); // true
-myIs.app.positiveEven(3); // false
+myIs.positiveEven(4); // true
+myIs.positiveEven(3); // false
 ```
 
-### 3. Task API (`chas/task`)
+### 3. Task API (`ts-chas/task`)
 
 A lazy, promise-like wrapper that empowers async operations with functional chaining, retries, dependency injection, and resilience logic limiters. Under the hood, a Task always resolves to a `ResultAsync`.
 
 ```ts
-import { Task } from 'chas';
+import { Task } from 'ts-chas/task';
 
 // Create a task
 const fetchTask = Task.from(
@@ -188,12 +190,12 @@ const readyTask = taskWithContext.provide({ dbUrl: 'https://db.example.com' });
 await readyTask.execute();
 ```
 
-### 4. Tagged Errors (`chas/tagged-errs`)
+### 4. Tagged Errors (`ts-chas/tagged-errs`)
 
 Define discriminated unions of native `Error` instances, allowing exhaustive pattern matching on errors with `Result`.
 
 ```ts
-import { chas } from 'chas';
+import { chas } from 'ts-chas';
 
 const AppError = chas.defineErrs({
 	NotFound: (resource: string) => ({ resource }),
@@ -226,12 +228,12 @@ const isNotFoundErr = chas.is.taggedErr(AppError.NotFound)(value);
 // also works: chas.is.taggedErr('NotFound')(value);
 ```
 
-### 5. Option API (`chas/option`)
+### 5. Option API (`ts-chas/option`)
 
 A functional equivalent to nullable values (`T | null | undefined`). An `Option<T>` is effectively an alias for `Result<NonNullable<T>, never>`, tightly integrating with the rest of the library.
 
 ```ts
-import { Option } from 'chas';
+import { Option } from 'ts-chas/option';
 
 const maybeUser = Option.fromNullable(getUserOrNull());
 
@@ -239,12 +241,12 @@ const maybeUser = Option.fromNullable(getUserOrNull());
 const userName = maybeUser.map(user => user.name).unwrapOr('Anonymous');
 ```
 
-### 6. Pipe and Flow (`chas/pipe`)
+### 6. Pipe and Flow (`ts-chas/pipe`)
 
 Pipe and Flow are utility functions that allow you to chain functions together in a more readable way. Pipe lets you move data through a pipeline of functions, while Flow lets you compose functions together for later use.
 
 ```ts
-import { pipe, flow } from 'chas';
+import { pipe, flow } from 'ts-chas/pipe';
 
 const add5 = (x: number) => x + 5;
 const double = (x: number) => x * 2;
@@ -285,26 +287,28 @@ const maybeNumber = Option.fromGuard(value, is.number); // Option<number>
 // Option to Task
 const task = Task.fromOption(maybeData, () => 'fail'); // Task<number, string>
 
-// Guard to Result-returning function
-const validateAge = guardToValidator(is.number.gte(18), 'Must be 18+'); // (value: number) => Result<number, string>
+// Guards to Result-returning function
+const validateAge = is
+	.function({
+		input: [is.number.gte(18)],
+		output: is.string,
+	})
+	.implResult(value => `You are ${value} years old`);
 
-// Guard to Task-returning function
-const validateAgeTask = guardToTask(is.number.gte(18), 'Must be 18+'); // (value: number) => Task<number, string>
+validateAge(20); // Result.Ok('You are 20 years old')
+validateAge(15); // Result.Err(GuardErr)
 ```
 
 **Guard validations directly to Results:**
 
 ```ts
-import { is, guardToValidator } from 'chas/guard';
+import { is } from 'ts-chas/guard';
 
 // Convert any guard to a validator that returns a Result
-const validateAge = guardToValidator(is.number.gte(18), 'Must be 18+');
+const validateAge = is.number.gte(18).error('Must be 18+').parse;
 
 const result = validateAge(20); // Result.Ok(20)
-const errResult = validateAge(15); // Result.Err('Must be 18+')
-
-const validateAgeWithGuardErr = guardToValidator(is.number.gte(18));
-const errResult = validateAgeWithGuardErr(15); // Result.Err(GuardErr), msg: 'Value failed validation: expected number.gte(18), but got number (15)'
+const errResult = validateAge(15); // Result.Err(GuardErr with msg: 'Must be 18+')
 ```
 
 **Options into Tasks:**
@@ -312,9 +316,10 @@ const errResult = validateAgeWithGuardErr(15); // Result.Err(GuardErr), msg: 'Va
 Options are frequently used for synchronous, optional values (such as checking a local cache or reading an environment variable). But when you need to integrate this optional data into a larger, asynchronous pipeline powered by `Task`s, converting it directly allows the entire flow to remain linear and cleanly composable without writing clunky `.isSome()` branches.
 
 ```ts
-import { Option, Task } from 'chas';
+import { fromNullable } from 'ts-chas/option';
+import { Task } from 'ts-chas/task';
 
-const checkCache = () => Option.fromNullable(localStorage.getItem('user'));
+const checkCache = () => fromNullable(localStorage.getItem('user'));
 
 // Upgrade the synchronous Option into an asynchronous Task!
 // We provide an error fallback in case the cache (Option) was empty.
