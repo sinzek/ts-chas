@@ -30,11 +30,12 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	 *
 	 * @throws {AggregateGuardError} If validation fails.
 	 */
-	impl: <F extends (...args: any[]) => any>(
-		fn: F &
-			((
-				...args: { [K in keyof Input]: InferGuard<Input[K]> }
-			) => Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>)
+	impl: <
+		F extends (
+			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
+		) => Output extends Guard<any> ? InferGuard<Output> : any,
+	>(
+		fn: F
 	) => (...args: Parameters<F>) => Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>;
 
 	/**
@@ -43,21 +44,25 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	 *
 	 * @throws {AggregateGuardError} If validation fails.
 	 */
-	implAsync: <F extends (...args: any[]) => any>(
-		fn: F &
-			((
-				...args: { [K in keyof Input]: InferGuard<Input[K]> }
-			) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>)
-	) => (...args: Parameters<F>) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
+	implAsync: <
+		F extends (
+			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
+		) => Promise<Output extends Guard<any> ? InferGuard<Output> : any>,
+	>(
+		fn: F
+	) => (
+		...args: Parameters<F>
+	) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
 
 	/**
 	 * Similar to `.impl`, but instead of throwing an `AggregateGuardError`, returns a `Result<T, AggregateGuardError>`.
 	 */
-	implResult: <F extends (...args: any[]) => any>(
-		fn: F &
-			((
-				...args: { [K in keyof Input]: InferGuard<Input[K]> }
-			) => Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>)
+	implResult: <
+		F extends (
+			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
+		) => Output extends Guard<any> ? InferGuard<Output> : any,
+	>(
+		fn: F
 	) => (
 		...args: Parameters<F>
 	) => Result<Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>, AggregateGuardError>;
@@ -65,11 +70,12 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	/**
 	 * Similar to `.implAsync`, but returns a `ResultAsync<T, AggregateGuardError>` instead of throwing.
 	 */
-	implResultAsync: <F extends (...args: any[]) => any>(
-		fn: F &
-			((
-				...args: { [K in keyof Input]: InferGuard<Input[K]> }
-			) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>)
+	implResultAsync: <
+		F extends (
+			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
+		) => Promise<Output extends Guard<any> ? InferGuard<Output> : any>,
+	>(
+		fn: F
 	) => (
 		...args: Parameters<F>
 	) => ResultAsync<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>, AggregateGuardError>;
