@@ -123,6 +123,11 @@ export interface Schema<T> {
 	 * Compatible with tRPC, react-hook-form, Drizzle, and other Standard Schema consumers.
 	 */
 	'~standard': StandardSchemaV1.Props<unknown, T>;
+
+	/**
+	 * Helper type to infer the output type of the schema.
+	 */
+	$infer: T;
 }
 
 // ---------------------------------------------------------------------------
@@ -636,6 +641,8 @@ function buildSchema<T>(name: string, guard: Guard<T, any>): Schema<T> {
 				};
 			},
 		},
+
+		$infer: undefined as T,
 	};
 
 	return schema;

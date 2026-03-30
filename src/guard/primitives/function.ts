@@ -51,7 +51,7 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	) => (...args: Parameters<F>) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
 
 	/**
-	 * Similar to `.impl`, but instead of throwing an `AggregateGuardError`, returns a `Result`.
+	 * Similar to `.impl`, but instead of throwing an `AggregateGuardError`, returns a `Result<T, AggregateGuardError>`.
 	 */
 	implResult: <F extends (...args: any[]) => any>(
 		fn: F &
@@ -63,7 +63,7 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	) => Result<Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>, AggregateGuardError>;
 
 	/**
-	 * Similar to `.implAsync`, but returns a `ResultAsync` instead of throwing.
+	 * Similar to `.implAsync`, but returns a `ResultAsync<T, AggregateGuardError>` instead of throwing.
 	 */
 	implResultAsync: <F extends (...args: any[]) => any>(
 		fn: F &

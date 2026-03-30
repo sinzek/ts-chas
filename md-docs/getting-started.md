@@ -150,7 +150,7 @@ Promises execute immediately upon creation and lack built-in mechanisms for retr
 A `Task` is a lazy, promise-like wrapper that empowers async operations with functional chaining, retries, and resilience logic limiters. Under the hood, a `Task` always resolves to a `ResultAsync`.
 
 ```ts
-import { Task } from 'ts-chas';
+import { Task } from 'ts-chas/task';
 
 // The function is NOT executed yet
 const fetchTask = Task.from(
@@ -178,7 +178,7 @@ const result = await resilientTask.execute();
 In `ts-chas`, an `Option<T>` is effectively an alias for `Result<NonNullable<T>, never>`, meaning it shares the exact same rich API methods as `Result`!
 
 ```ts
-import { Option } from 'ts-chas';
+import { Option } from 'ts-chas/option';
 
 // Converting unsafe nullable values into safe Options
 const maybeUser = Option.nullable(getUserFromCache('123')); // Option<User>
@@ -197,10 +197,12 @@ const cacheTask = Task.fromOption(maybeUser, () => new Error('Cache miss'));
 
 ## 5. Validation and Parsing with `Guard`
 
-The Guard API provides chainable validation and schema parsing. It ensures that data entering your system exactly matches the types your code expects.
+The Guard API provides chainable validation, schema parsing, and easy type inference. It ensures that data entering your system exactly matches the types your code expects.
+
+> **Note:** All chains returned by `ts-chas/guard` natively implement the **[Standard Schema v1](https://github.com/standard-schema/standard-schema)** specification via the `~standard` property, meaning they can be seamlessly plugged into tRPC, react-hook-form, Drizzle, and other ecosystems.
 
 ```ts
-import { is, defineSchemas } from 'ts-chas';
+import { is, defineSchemas, type InferSchema, AggregateGuardError } from 'ts-chas/guard';
 
 // 1. Simple runtime type guards
 const isPositiveEven = is.number.positive.even;
@@ -209,18 +211,36 @@ if (isPositiveEven(myVar)) {
 	// myVar is typed as number here
 }
 
-// 2. Complex schemas with parsing
+// 2. Inline Parsing
+// Guards can be evaluated directly to Results without `try/catch`
+const emailResult = is.string.trim().email.parse('  contact@example.com  ');
+// Result.Ok('contact@example.com')
+
+// 3. Wrapping fragile functions
+// is.function allows you to add type safety, input validation, and output validation to existing functions
+const addIfPositive = is
+	.function({
+		input: [is.number.positive, is.number.positive],
+		output: is.number.positive,
+	})
+	.implResult((a, b) => a + b);
+
+const sumResult = addIfPositive(5, 10); // Result.Ok(15)
+const invalidResult = addIfPositive(-5, 10); // Result.Err(AggregateGuardError)
+
+// 4. Complex schemas with parsing
 const schemas = defineSchemas({
 	UserPayload: {
 		id: is.string.uuid('v4'),
 		email: is.string.email,
-		age: is.number.gte(18).setErrMsg('User must be an adult'),
+		age: is.number.gte(18).error('User must be an adult'),
 		tags: is.array(is.string).min(1),
 	},
 });
 
 // Infer the TypeScript type from the schema!
-type UserPayload = chas.InferSchema<typeof schemas.UserPayload>;
+type UserPayload = InferSchema<typeof schemas.UserPayload>;
+// OR: type UserPayload = typeof schemas.UserPayload.$infer;
 
 // Parse unknown data. Returns a Result containing either the strongly-typed data
 // or an array of detailed GuardErr validation errors.
@@ -230,7 +250,17 @@ if (parsed.isOk()) {
 	// parsed.value is safely typed as UserPayload
 	saveUser(parsed.value);
 } else {
-	console.error('Validation failed:', parsed.error);
+	console.error('Validation failed:', parsed.error); // AggregateGuardError
+}
+
+// Alternatively, use .assert() to throw an AggregateGuardError containing all the nested errors:
+try {
+	schemas.UserPayload.assert(incomingJson);
+} catch (e) {
+	if (e instanceof AggregateGuardError) {
+		console.error(e.format()); // { 'age': ['User must be an adult'], 'tags': ['Expected array, but got string'] }
+		console.error(e.errors); // GuardErr[]
+	}
 }
 ```
 
@@ -241,7 +271,7 @@ if (parsed.isOk()) {
 `ts-chas` provides `pipe` and `flow` utility functions to compose small, focused functions into larger pipelines, making your code highly readable.
 
 ```ts
-import { pipe, flow } from 'ts-chas';
+import { pipe, flow } from 'ts-chas/pipe';
 
 const add5 = (x: number) => x + 5;
 const double = (x: number) => x * 2;
