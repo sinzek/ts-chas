@@ -1,6 +1,6 @@
-`chas` is a functional programming and utility library for TypeScript. It provides an ergonomic set of tools and [monads](<https://en.wikipedia.org/wiki/Monad_(computer_science)>) for explicitly handling errors, defining runtime types, input validation, managing asynchronous operations, and composing functions.
+`chas` is a functional programming and utility library for TypeScript. It provides an ergonomic set of tools and [monads](<https://en.wikipedia.org/wiki/Monad_(computer_science)>) for explicitly handling errors, defining runtime types, schema validation, managing asynchronous operations, and composing functions.
 
-[**View the full API documentation here!**](https://sinzek.github.io/chas/)
+[**View the full API documentation here!**](https://docs.cbrock.dev)
 
 ## Overview
 
