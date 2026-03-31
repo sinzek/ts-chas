@@ -51,7 +51,7 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 
 export interface StringGuard extends Guard<string, StringHelpers> {}
 
-interface IsoHelpers {
+export interface IsoHelpers {
 	/** Validates ISO 8601 date-only format: YYYY-MM-DD */
 	date: Guard<string, StringHelpers & IsoHelpers>;
 	/**
@@ -76,11 +76,11 @@ interface IsoHelpers {
 	}) => Guard<string, StringHelpers & IsoHelpers>;
 }
 
-interface BoolStrParsed {
+export interface BoolStrParsed {
 	asBool: Guard<boolean, {}>;
 }
 
-interface BoolStrHelpers extends BoolStrParsed {
+export interface BoolStrHelpers extends BoolStrParsed {
 	truthy: (options?: {
 		caseSensitive?: boolean;
 		values?: readonly string[];

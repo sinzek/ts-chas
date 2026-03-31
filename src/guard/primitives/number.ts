@@ -1,7 +1,7 @@
 import type { Brand } from '../shared.js';
 import { makeGuard, type Guard, factory } from '../shared.js';
 
-interface NumberHelpers {
+export interface NumberHelpers {
 	/** Validates that the number is greater than the minimum. */
 	gt: (min: number) => Guard<number, NumberHelpers>;
 	/** Validates that the number is greater than or equal to the minimum. */

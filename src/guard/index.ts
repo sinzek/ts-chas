@@ -41,6 +41,46 @@ export type { Schema, InferSchema, InferInput } from './schema.js';
 // core types
 export type { Guard, InferGuard, GuardMeta, GuardErr, Brand } from './shared.js';
 
+// Export all helper and guard types to ensure portability of inferred guard types
+export type { ObjectHelpers } from './objects/shared.js';
+export type { ArrayHelpers } from './shared.js';
+export type { StringHelpers, HashHelpers } from './primitives/string.js';
+export type { NumberHelpers } from './primitives/number.js';
+export type { BooleanHelpers } from './primitives/boolean.js';
+export type { BigIntHelpers } from './primitives/bigint.js';
+export type { SymbolHelpers } from './primitives/symbol.js';
+export type { EnumHelpers } from './misc/enum.js';
+export type { DateHelpers } from './built-ins/date.js';
+export type { SetHelpers } from './built-ins/set.js';
+export type { MapHelpers } from './built-ins/map.js';
+export type { FileHelpers } from './built-ins/file.js';
+export type { RegExpHelpers } from './built-ins/regexp.js';
+export type { UrlHelpers } from './built-ins/url.js';
+export type { ErrorHelpers } from './built-ins/error.js';
+export type { JsonHelpers } from './misc/json.js';
+export type { ResultHelpers } from './custom/result.js';
+export type { OptionHelpers } from './custom/option.js';
+export type { FunctionHelpers } from './primitives/function.js';
+export type { TaggedErrGuardFactory } from './custom/tagged-err.js';
+export type { TemplateLiteralGuardFactory } from './misc/template-literal.js';
+export type { XorGuardFactory } from './misc/xor.js';
+export type { IntersectionGuardFactory } from './misc/intersection.js';
+export type { UnionGuardFactory } from './misc/union.js';
+export type { LiteralGuardFactory } from './misc/literal.js';
+export type { TupleGuardFactory } from './objects/tuple.js';
+export type { RecordGuardFactory } from './objects/record.js';
+export type { ObjectGuardFactory } from './objects/object.js';
+export type { StringGuard } from './primitives/string.js';
+export type { NumberGuard, NaNGuard } from './primitives/number.js';
+export type { BooleanGuard } from './primitives/boolean.js';
+export type { BigIntGuard } from './primitives/bigint.js';
+export type { SymbolGuard } from './primitives/symbol.js';
+export type { UndefinedGuard, VoidGuard } from './primitives/undefined.js';
+export type { FileGuard } from './built-ins/file.js';
+export type { ErrorGuard } from './built-ins/error.js';
+export type { PromiseGuard } from './built-ins/promise.js';
+export type { DateGuard } from './built-ins/date.js';
+
 // guard authoring utilities for custom guard creation
 export { makeGuard, factory, transformer, terminal, property } from './shared.js';
 
