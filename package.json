@@ -1,5 +1,7 @@
 {
   "name": "ts-chas",
+  "repository": "github:sinzek/chas",
+  "homepage": "https://docs.cbrock.dev",
   "version": "1.0.3",
   "type": "module",
   "description": "A functional programming and utility library for TypeScript that provides tools for explicit error handling, runtime validation, and asynchronous operations.",
@@ -20,8 +22,11 @@
     "pipe",
     "flow"
   ],
-  "author": "Chase Brock (github.com/sinzek)",
+  "author": "Chase Brock",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/sinzek/chas/issues"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
