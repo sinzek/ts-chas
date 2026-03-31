@@ -1014,10 +1014,7 @@ const universalHelpers: Record<string, any> = {
 					return target(val);
 				},
 				meta: { name: `${target.meta.name}.coerce` },
-				transform: (v: unknown) => {
-					const val = coercer ? coercer(v) : v;
-					return target.meta.transform ? target.meta.transform(val, val) : val;
-				},
+				transform: (v: unknown) => (coercer ? coercer(v) : v),
 			};
 		})
 	),
@@ -1190,11 +1187,11 @@ export function createProxy<T, H extends Record<string, any>>(
 							...target.meta,
 							...result.meta,
 							transform: result.transform
-								? (v: any, original: any) =>
-										result.transform!(
-											target.meta.transform ? target.meta.transform(v, original) : v,
-											original
-										)
+								? (v: any, original: any) => {
+										const parentVal = target.meta.transform ? target.meta.transform(v, original) : v;
+										const newVal = result.transform!(parentVal, original);
+										return newVal;
+								  }
 								: target.meta.transform,
 						} as GuardMeta,
 					});

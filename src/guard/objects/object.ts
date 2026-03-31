@@ -37,11 +37,15 @@ export const ObjectGuardFactory: ObjectGuardFactory = (...args: any[]) => {
 				if (v == null || typeof v !== 'object' || Array.isArray(v)) return v;
 				const obj = v as Record<string, any>;
 				const result: Record<string, any> = { ...obj };
-				for (const key of Object.keys(schema)) {
+				const keys = Object.keys(schema);
+				for (const key of keys) {
 					const child = schema[key];
 					if (child) {
 						const val = obj[key];
-						result[key] = child.meta.transform ? child.meta.transform(val, val) : val;
+						const transformerFn = child.meta.transform;
+						if (transformerFn) {
+							result[key] = transformerFn(val, val);
+						}
 					}
 				}
 				return result;
