@@ -5,8 +5,22 @@ import { makeGuard, factory, type Guard } from '../shared.js';
 // ---------------------------------------------------------------------------
 
 export interface ErrorHelpers {
+	/**
+	 * Checks if the error's message contains the given pattern.
+	 * @param pattern The pattern to match against the error message.
+	 * @returns A guard that checks if the error's message contains the given pattern.
+	 */
 	message: (pattern: string | RegExp) => Guard<Error, ErrorHelpers>;
+	/**
+	 * Checks if the error name matches the given name.
+	 * @param name The name to match against the error name.
+	 * @returns A guard that checks if the error name matches the given name.
+	 */
 	name: (name: string) => Guard<Error, ErrorHelpers>;
+	/**
+	 * Checks if the error has a cause.
+	 * @returns A guard that checks if the error has a cause.
+	 */
 	hasCause: Guard<Error, ErrorHelpers>;
 }
 

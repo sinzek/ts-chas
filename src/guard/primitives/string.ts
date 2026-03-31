@@ -195,11 +195,11 @@ export interface StringHelpers {
 		version?: 'v1' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8';
 	}) => Guard<string, StringHelpers>;
 	/** Convenience helper for v4 UUID validation. */
-	uuidv4: () => Guard<string, StringHelpers>;
+	uuidv4: Guard<string, StringHelpers>;
 	/** Convenience helper for v6 UUID validation. */
-	uuidv6: () => Guard<string, StringHelpers>;
+	uuidv6: Guard<string, StringHelpers>;
 	/** Convenience helper for v7 UUID validation. */
-	uuidv7: () => Guard<string, StringHelpers>;
+	uuidv7: Guard<string, StringHelpers>;
 	/** Validates minimum string length (inclusive). */
 	min: (min: number) => Guard<string, StringHelpers>;
 	/** Validates maximum string length (inclusive). */
@@ -423,18 +423,18 @@ const stringHelpers: StringHelpers = {
 		}
 		return true;
 	}),
-	uuidv4: factory(() => (v: string) => {
+	uuidv4: ((v: string): v is string => {
 		if (!RGX.uuid.test(v)) return false;
 		return /[89ab]/i.test(v[19]!) && v[14] === '4';
-	}),
-	uuidv6: factory(() => (v: string) => {
+	}) as any,
+	uuidv6: ((v: string): v is string => {
 		if (!RGX.uuid.test(v)) return false;
 		return /[89ab]/i.test(v[19]!) && v[14] === '6';
-	}),
-	uuidv7: factory(() => (v: string) => {
+	}) as any,
+	uuidv7: ((v: string): v is string => {
 		if (!RGX.uuid.test(v)) return false;
 		return /[89ab]/i.test(v[19]!) && v[14] === '7';
-	}),
+	}) as any,
 
 	min: factory<[number], (v: string) => boolean, StringHelpers>((min: number) => (v: string) => v.length >= min),
 	max: factory<[number], (v: string) => boolean, StringHelpers>((max: number) => (v: string) => v.length <= max),

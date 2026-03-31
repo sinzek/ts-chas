@@ -35,10 +35,10 @@ describe('is.string (v2)', () => {
 		});
 
 		it('uuidv4 / uuidv7 convenience', () => {
-			expect(is.string.uuidv4()('550e8400-e29b-41d4-a716-446655440000')).toBe(true);
-			expect(is.string.uuidv4()('550e8400-e29b-71d4-a716-446655440000')).toBe(false); // v7
-			expect(is.string.uuidv7()('017f22e2-79b0-7cc3-98c4-dc0c0c07398f')).toBe(true);
-			expect(is.string.uuidv7()('550e8400-e29b-41d4-a716-446655440000')).toBe(false); // v4
+			expect(is.string.uuidv4('550e8400-e29b-41d4-a716-446655440000')).toBe(true);
+			expect(is.string.uuidv4('550e8400-e29b-71d4-a716-446655440000')).toBe(false); // v7
+			expect(is.string.uuidv7('017f22e2-79b0-7cc3-98c4-dc0c0c07398f')).toBe(true);
+			expect(is.string.uuidv7('550e8400-e29b-41d4-a716-446655440000')).toBe(false); // v4
 		});
 
 		it('guid (relaxed, no variant enforcement)', () => {

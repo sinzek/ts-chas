@@ -28,16 +28,15 @@ export interface SetHelpers<T, TSet = Set<T>> {
 }
 
 const setHelpers: SetHelpers<any> = {
-	nonEmpty: ((v: unknown) => v instanceof Set && v.size > 0) as any,
-	empty: ((v: unknown) => v instanceof Set && v.size === 0) as any,
-	size: factory((n: number) => (v: unknown) => v instanceof Set && v.size === n),
-	minSize: factory((n: number) => (v: unknown) => v instanceof Set && v.size >= n),
-	maxSize: factory((n: number) => (v: unknown) => v instanceof Set && v.size <= n),
-	has: factory((value: any) => (v: unknown) => v instanceof Set && v.has(value)),
+	nonEmpty: ((v: Set<any>) => v.size > 0) as any,
+	empty: ((v: Set<any>) => v.size === 0) as any,
+	size: factory((n: number) => (v: Set<any>) => v.size === n),
+	minSize: factory((n: number) => (v: Set<any>) => v.size >= n),
+	maxSize: factory((n: number) => (v: Set<any>) => v.size <= n),
+	has: factory((value: any) => (v: Set<any>) => v.has(value)),
 	subsetOf: factory((superset: Iterable<any>) => {
 		const supersetSet = superset instanceof Set ? superset : new Set(superset);
-		return (v: unknown) => {
-			if (!(v instanceof Set)) return false;
+		return (v: Set<any>) => {
 			for (const item of v) {
 				if (!supersetSet.has(item)) return false;
 			}
@@ -46,15 +45,11 @@ const setHelpers: SetHelpers<any> = {
 	}),
 	supersetOf: factory((subset: Iterable<any>) => {
 		const subsetArr = [...subset];
-		return (v: unknown) => {
-			if (!(v instanceof Set)) return false;
-			return subsetArr.every(item => v.has(item));
-		};
+		return (v: Set<any>) => subsetArr.every(item => v.has(item));
 	}),
 	disjointFrom: factory((other: Iterable<any>) => {
 		const otherSet = other instanceof Set ? other : new Set(other);
-		return (v: unknown) => {
-			if (!(v instanceof Set)) return false;
+		return (v: Set<any>) => {
 			for (const item of v) {
 				if (otherSet.has(item)) return false;
 			}

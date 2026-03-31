@@ -20,7 +20,7 @@ export interface UrlHelpers {
 	protocol: (pattern: RegExp) => Guard<string, UrlHelpers>;
 	/** Filters by pathname regex */
 	pathname: (pattern: RegExp) => Guard<string, UrlHelpers>;
-	/** Filters by port. If called with no args, asserts a port is present */
+	/** Filters by port. If called with no args, validates that a port is present */
 	port: (n?: number) => Guard<string, UrlHelpers>;
 }
 

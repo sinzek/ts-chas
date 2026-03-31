@@ -697,14 +697,95 @@ export function evaluateError(
 
 // defined here to allow both is.array and the universal .array helper to use them
 export interface ArrayHelpers<T> {
+	/**
+	 * Validates that the array is non-empty.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).nonEmpty;
+	 * guard.parse([]); // Err('Expected non-empty array')
+	 * guard.parse(['a']); // Ok(['a'])
+	 * ```
+	 */
 	nonEmpty: Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Validates that the array is empty.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).empty;
+	 * guard.parse([]); // Ok([])
+	 * guard.parse(['a']); // Err('Expected empty array')
+	 * ```
+	 */
 	empty: Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Validates that all elements in the array are unique (deep equality).
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).unique;
+	 * guard.parse(['a', 'b', 'c']); // Ok(['a', 'b', 'c'])
+	 * guard.parse(['a', 'b', 'a']); // Err('Expected unique elements')
+	 * ```
+	 */
 	unique: Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Validates that the array length is at least `n`.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).min(2);
+	 * guard.parse(['a', 'b']); // Ok(['a', 'b'])
+	 * guard.parse(['a']); // Err('Expected array of length at least 2')
+	 * ```
+	 */
 	min: (n: number) => Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Validates that the array length is at most `n`.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).max(2);
+	 * guard.parse(['a', 'b']); // Ok(['a', 'b'])
+	 * guard.parse(['a', 'b', 'c']); // Err('Expected array of length at most 2')
+	 * ```
+	 */
 	max: (n: number) => Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Validates that the array length is exactly `n`.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).size(2);
+	 * guard.parse(['a', 'b']); // Ok(['a', 'b'])
+	 * guard.parse(['a']); // Err('Expected array of length 2')
+	 * ```
+	 */
 	size: (n: number) => Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Validates that the array contains a specific value.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).includes('a');
+	 * guard.parse(['a', 'b']); // Ok(['a', 'b'])
+	 * guard.parse(['b', 'c']); // Err('Expected array to include "a"')
+	 * ```
+	 */
 	includes: (item: T) => Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Validates that the array does not contain a specific value.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).excludes('a');
+	 * guard.parse(['b', 'c']); // Ok(['b', 'c'])
+	 * guard.parse(['a', 'b']); // Err('Expected array to not include "a"')
+	 * ```
+	 */
 	excludes: (item: T) => Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Wraps the array in `Object.freeze()` during validation, returning a readonly array when parsed. Since arrays are already readonly, this is not strictly necessary but is included for consistency with other collection guards.
+	 * @example
+	 * ```ts
+	 * const guard = is.array(is.string).readonly;
+	 * guard.parse(['a', 'b']); // Ok(['a', 'b'])
+	 * guard.parse(['a', 'b']); // Err('Expected array of length 2')
+	 * ```
+	 */
 	readonly: Guard<Readonly<T[]>, ArrayHelpers<T>>;
 }
 
