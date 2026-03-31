@@ -631,53 +631,63 @@ const stringHelpers: StringHelpers = {
 			}
 	),
 
-	trim: transformer<string, string, [], StringHelpers>(target => {
-		return {
-			fn: (v: unknown): v is string => typeof v === 'string' && target(v.trim()),
-			meta: { name: `trimmed ${target.meta.name}` },
-			transform: (v: string) => v.trim(),
-		};
-	}),
-	toLowerCase: transformer<string, string, [], StringHelpers>(target => {
-		return {
-			fn: (v: unknown): v is string => typeof v === 'string' && target(v.toLowerCase()),
-			meta: { name: `lowercase ${target.meta.name}` },
-			transform: (v: string) => v.toLowerCase(),
-		};
-	}),
-	toUpperCase: transformer<string, string, [], StringHelpers>(target => {
-		return {
-			fn: (v: unknown): v is string => typeof v === 'string' && target(v.toUpperCase()),
-			meta: { name: `uppercase ${target.meta.name}` },
-			transform: (v: string) => v.toUpperCase(),
-		};
-	}),
-	normalize: transformer<string, string, [any?], StringHelpers>(
-		(target, form: 'NFC' | 'NFD' | 'NFKC' | 'NFKD' = 'NFC') => {
-			return {
-				fn: (v: unknown): v is string => typeof v === 'string' && target(v.normalize(form)),
-				meta: { name: `normalized ${target.meta.name}` },
-				transform: (v: string) => v.normalize(form),
-			};
-		}
-	),
+	trim: transformer<string, string, [], StringHelpers>(target => ({
+		fn: (v: unknown): v is string => {
+			const val = target.meta.transform ? target.meta.transform(v, v) : v;
+			return typeof val === 'string' && target(val.trim());
+		},
+		meta: { name: `${target.meta.name}.trim` },
+		transform: (v: string) => v.trim(),
+	})),
+
+	toLowerCase: transformer<string, string, [], StringHelpers>(target => ({
+		fn: (v: unknown): v is string => {
+			const val = target.meta.transform ? target.meta.transform(v, v) : v;
+			return typeof val === 'string' && target(val.toLowerCase());
+		},
+		meta: { name: `${target.meta.name}.toLowerCase` },
+		transform: (v: string) => v.toLowerCase(),
+	})),
+
+	toUpperCase: transformer<string, string, [], StringHelpers>(target => ({
+		fn: (v: unknown): v is string => {
+			const val = target.meta.transform ? target.meta.transform(v, v) : v;
+			return typeof val === 'string' && target(val.toUpperCase());
+		},
+		meta: { name: `${target.meta.name}.toUpperCase` },
+		transform: (v: string) => v.toUpperCase(),
+	})),
+
+	normalize: transformer<string, string, [any?], StringHelpers>((target, form: 'NFC' | 'NFD' | 'NFKC' | 'NFKD' = 'NFC') => ({
+		fn: (v: unknown): v is string => {
+			const val = target.meta.transform ? target.meta.transform(v, v) : v;
+			return typeof val === 'string' && target(val.normalize(form));
+		},
+		meta: { name: `${target.meta.name}.normalize` },
+		transform: (v: string) => v.normalize(form),
+	})),
 	iso: property(
 		transformer<string, string, [], IsoHelpers>(target => {
 			const ISO_RE = /^\d{4}-\d{2}-\d{2}/;
 			return {
-				fn: (v: unknown): v is string =>
-					typeof v === 'string' && ISO_RE.test(v) && !isNaN(Date.parse(v)) && target(v),
+				fn: (v: unknown): v is string => {
+					if (typeof v !== 'string') return false;
+					const val = target.meta.transform ? target.meta.transform(v, v) : v;
+					return typeof val === 'string' && ISO_RE.test(val) && !isNaN(Date.parse(val)) && target(v);
+				},
 				meta: { name: `${target.meta.name}.iso` },
 				helpers: {
 					date: property(
-						transformer<string, string, [], IsoHelpers>(() => ({
-							fn: (v: unknown): v is string =>
-								typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)),
-							meta: { name: 'string.iso.date' },
+						transformer<string, string, [], IsoHelpers>(target => ({
+							fn: (v: unknown): v is string => {
+								const val = target.meta.transform ? target.meta.transform(v, v) : v;
+								return typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val) && !isNaN(Date.parse(val)) && target(v);
+							},
+							meta: { name: `${target.meta.name}.iso.date` },
 						}))
 					),
 					time: transformer<string, string, [{ precision?: number }?], IsoHelpers>(
-						(_target, options?: { precision?: number }) => {
+						(target, options?: { precision?: number }) => {
 							const p = options?.precision;
 							let re: RegExp;
 							if (p === undefined) {
@@ -690,8 +700,12 @@ const stringHelpers: StringHelpers = {
 								re = new RegExp(`^\\d{2}:\\d{2}:\\d{2}\\.\\d{${p}}$`);
 							}
 							return {
-								fn: (v: unknown): v is string => typeof v === 'string' && re.test(v),
-								meta: { name: 'string.iso.time' },
+								fn: (v: unknown): v is string => {
+									const val = target.meta.transform ? target.meta.transform(v, v) : v;
+									// Note: we don't call target(v) for sub-helpers to avoid being blocked by parent's strict predicate
+									return typeof val === 'string' && re.test(val);
+								},
+								meta: { name: `${target.meta.name}.iso.time` },
 							};
 						}
 					),
@@ -700,7 +714,7 @@ const stringHelpers: StringHelpers = {
 						string,
 						[{ offset?: boolean; local?: boolean; precision?: number }?],
 						IsoHelpers
-					>((_target, options?: { offset?: boolean; local?: boolean; precision?: number }) => {
+					>((target, options?: { offset?: boolean; local?: boolean; precision?: number }) => {
 						const p = options?.precision;
 						const allowOffset = options?.offset !== false;
 						const allowLocal = options?.local === true;
@@ -729,9 +743,11 @@ const stringHelpers: StringHelpers = {
 
 						const re = new RegExp(`^\\d{4}-\\d{2}-\\d{2}T${timePart}${tzPart}$`);
 						return {
-							fn: (v: unknown): v is string =>
-								typeof v === 'string' && re.test(v) && !isNaN(Date.parse(v)),
-							meta: { name: 'string.iso.datetime' },
+							fn: (v: unknown): v is string => {
+								const val = target.meta.transform ? target.meta.transform(v, v) : v;
+								return typeof val === 'string' && re.test(val) && !isNaN(Date.parse(val));
+							},
+							meta: { name: `${target.meta.name}.iso.datetime` },
 						};
 					}),
 				} as any,
@@ -756,24 +772,26 @@ const stringHelpers: StringHelpers = {
 				StringHelpers & BoolStrParsed
 			>((innerTarget, options) => ({
 				fn: (v: unknown): v is string => {
-					if (!target(v)) return false;
-					const str = v as string;
+					const val = innerTarget.meta.transform ? innerTarget.meta.transform(v, v) : v;
+					if (typeof val !== 'string') return false;
+					const str = val as string;
 
 					if (options?.values) {
 						if (options.caseSensitive) return options.values.includes(str);
-						const val = str.toLowerCase();
-						return options.values.some(v => v.toLowerCase() === val);
+						const s = str.toLowerCase();
+						return options.values.some(v_loop => v_loop.toLowerCase() === s);
 					}
 
+					const s = options?.caseSensitive ? str : str.toLowerCase();
 					if (options?.caseSensitive) {
 						return (
-							boolStrVals.truthy.has(str) ||
-							boolStrVals.truthyCapitalized.has(str) ||
-							boolStrVals.truthyAllCaps.has(str)
+							boolStrVals.truthy.has(s) ||
+							boolStrVals.truthyCapitalized.has(s) ||
+							boolStrVals.truthyAllCaps.has(s)
 						);
 					}
 
-					return boolStrVals.truthy.has(str.toLowerCase());
+					return boolStrVals.truthy.has(s);
 				},
 				meta: { name: `${innerTarget.meta.name}.truthy`, id: 'string' },
 				helpers: { asBool } as any,
@@ -786,24 +804,26 @@ const stringHelpers: StringHelpers = {
 				StringHelpers & BoolStrParsed
 			>((innerTarget, options) => ({
 				fn: (v: unknown): v is string => {
-					if (!target(v)) return false;
-					const str = v as string;
+					const val = innerTarget.meta.transform ? innerTarget.meta.transform(v, v) : v;
+					if (typeof val !== 'string') return false;
+					const str = val as string;
 
 					if (options?.values) {
 						if (options.caseSensitive) return options.values.includes(str);
-						const val = str.toLowerCase();
-						return options.values.some(v => v.toLowerCase() === val);
+						const s = str.toLowerCase();
+						return options.values.some(v_loop => v_loop.toLowerCase() === s);
 					}
 
+					const s = options?.caseSensitive ? str : str.toLowerCase();
 					if (options?.caseSensitive) {
 						return (
-							boolStrVals.falsy.has(str) ||
-							boolStrVals.falsyCapitalized.has(str) ||
-							boolStrVals.falsyAllCaps.has(str)
+							boolStrVals.falsy.has(s) ||
+							boolStrVals.falsyCapitalized.has(s) ||
+							boolStrVals.falsyAllCaps.has(s)
 						);
 					}
 
-					return boolStrVals.falsy.has(str.toLowerCase());
+					return boolStrVals.falsy.has(s);
 				},
 				meta: { name: `${innerTarget.meta.name}.falsy`, id: 'string' },
 				helpers: { asBool } as any,
@@ -812,10 +832,12 @@ const stringHelpers: StringHelpers = {
 			return {
 				fn: (v: unknown): v is string => {
 					if (!target(v)) return false;
-					const value = (v as string).toLowerCase();
-					return boolStrVals.truthy.has(value) || boolStrVals.falsy.has(value);
+					const val = target.meta.transform ? target.meta.transform(v, v) : v;
+					if (typeof val !== 'string') return false;
+					const s = val.toLowerCase();
+					return boolStrVals.truthy.has(s) || boolStrVals.falsy.has(s);
 				},
-				meta: { name: 'string.boolStr', id: 'string' },
+				meta: { name: `${target.meta.name}.boolStr`, id: 'string' },
 				helpers: { truthy: truthy as any, falsy: falsy as any, asBool: asBool as any } as any,
 			};
 		})
@@ -829,41 +851,29 @@ const stringHelpers: StringHelpers = {
 				maxDepth?: number;
 				safe?: boolean;
 			}
-		) => {
-			return {
-				fn: (v: unknown): v is TParsed => {
-					if (!target(v)) return false;
-
-					try {
-						const parsed = JSON.parse(v as string);
-
-						if (
-							options?.type === 'object' &&
-							(typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-						)
-							return false;
-						if (options?.type === 'array' && !Array.isArray(parsed)) return false;
-
-						if (options?.schema && !options.schema(parsed)) return false;
-
-						if (options?.safe && !isSafeObject(parsed)) return false;
-
-						if (options?.maxDepth && getObjectDepth(parsed) > options.maxDepth) return false;
-
-						return true;
-					} catch {
+		) => ({
+			fn: (v: unknown): v is string => {
+				if (!target(v)) return false;
+				const val = target.meta.transform ? target.meta.transform(v, v) : v;
+				if (typeof val !== 'string') return false;
+				try {
+					const parsed = JSON.parse(val);
+					if (options?.type === 'object' && (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)))
 						return false;
-					}
-				},
-				meta: {
-					name: `parsed json ${target.meta.name}`,
-					shape: options?.schema?.meta.shape,
-				},
-				transform: (v: string) => JSON.parse(v),
-				helpers: {},
-				replaceHelpers: true,
-			};
-		}
+					if (options?.type === 'array' && !Array.isArray(parsed)) return false;
+					if (options?.schema && !options.schema(parsed)) return false;
+					if (options?.safe && !isSafeObject(parsed)) return false;
+					if (options?.maxDepth && getObjectDepth(parsed) > options.maxDepth) return false;
+					return true;
+				} catch {
+					return false;
+				}
+			},
+			meta: { name: `${target.meta.name}.parsedJson` },
+			transform: (v: string) => JSON.parse(v),
+			helpers: {},
+			replaceHelpers: true,
+		})
 	),
 };
 

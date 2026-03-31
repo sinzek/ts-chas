@@ -2,6 +2,7 @@ import { ok, err, type Result } from '../result/result.js';
 import { GlobalErrs, type InferErr } from '../tagged-errs.js';
 import { deepEqual, safeStringify } from '../utils.js';
 import type { StandardSchemaV1 } from '../standard-schema.js';
+import { COERCERS } from './coercion.js';
 
 /**
  * A tagged error produced when guard validation fails.
@@ -281,6 +282,22 @@ export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unkn
 	 * `is.number.positive.array` → `Guard<number[], ArrayHelpers<number>>`
 	 */
 	array: Guard<T[], ArrayHelpers<T>>;
+	/**
+	 * Adds coercion support to the guard.
+	 *
+	 * When enabled, the guard attempts to cast "loose" inputs (like numeric strings or truthy values)
+	 * into the target type before validation.
+	 *
+	 * Coercion happens during `.parse()`, `.assert()`, and Standard Schema validation.
+	 *
+	 * @example
+	 * ```ts
+	 * is.number.coerce.parse("123");       // Ok(123)
+	 * is.boolean.coerce.parse("true");     // Ok(true)
+	 * is.date.coerce.parse("2021-01-01");  // Ok(Date)
+	 * ```
+	 */
+	coerce: Guard<T, H>;
 	/**
 	 * Sets a fallback value (or a function that returns one) to use when validation fails.
 	 *
@@ -677,7 +694,6 @@ export function evaluateFallback(fallback: any, meta: GuardMeta, value: unknown)
 	}
 	return fallback;
 }
-
 /** @internal Evaluates an error message (static string or function). */
 export function evaluateError(
 	error: string | ((ctx: { meta: GuardMeta; value: unknown }) => string) | undefined,
@@ -964,6 +980,8 @@ const universalHelpers: Record<string, any> = {
 				id: 'array',
 				elementGuards: [target],
 			},
+			transform: (v: any[]) =>
+				v.map(item => (target.meta.transform ? target.meta.transform(item, item) : item)),
 			helpers: arrayHelpers,
 			replaceHelpers: true,
 		}))
@@ -983,6 +1001,26 @@ const universalHelpers: Record<string, any> = {
 		transform: (v: any) => fn(v), // createProxy handles composition with parent transforms
 		// no helpers/replaceHelpers → preserves current helpers
 	})),
+
+	coerce: property(
+		transformer((target: Guard<any, Record<string, any>>) => {
+			const id = target.meta.id.toLowerCase();
+			const coercer = COERCERS[id];
+
+			return {
+				fn: (v: unknown): v is any => {
+					if (target(v)) return true;
+					const val = coercer ? coercer(v) : v;
+					return target(val);
+				},
+				meta: { name: `${target.meta.name}.coerce` },
+				transform: (v: unknown) => {
+					const val = coercer ? coercer(v) : v;
+					return target.meta.transform ? target.meta.transform(val, val) : val;
+				},
+			};
+		})
+	),
 };
 
 function getType(v: any): string {

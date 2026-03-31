@@ -29,7 +29,24 @@ export const ObjectGuardFactory: ObjectGuardFactory = (...args: any[]) => {
 			}
 			return true;
 		},
-		{ name: `object<${names}>`, id: 'object', shape: schema },
+		{
+			name: `object<${names}>`,
+			id: 'object',
+			shape: schema,
+			transform: (v: unknown) => {
+				if (v == null || typeof v !== 'object' || Array.isArray(v)) return v;
+				const obj = v as Record<string, any>;
+				const result: Record<string, any> = { ...obj };
+				for (const key of Object.keys(schema)) {
+					const child = schema[key];
+					if (child) {
+						const val = obj[key];
+						result[key] = child.meta.transform ? child.meta.transform(val, val) : val;
+					}
+				}
+				return result;
+			},
+		},
 		objectHelpers as any
 	);
 };
