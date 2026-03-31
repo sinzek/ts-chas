@@ -1,5 +1,10 @@
+import * as _chas from './chas.js';
+
 /**
  * Main library namespace containing all exports from the library.
  * @module chas
  */
-export * as chas from './chas.js';
+export import chas = _chas;
+
+// Also export everything flatly for direct access and better type resolution
+export * from './chas.js';

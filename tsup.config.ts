@@ -14,7 +14,7 @@ export default defineConfig({
 	target: 'es2022',
 	platform: 'node',
 	tsconfig: 'tsconfig.build.json',
-	dts: true,
+	dts: false,
 	minify: false,
 	sourcemap: true,
 	clean: true,

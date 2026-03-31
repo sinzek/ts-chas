@@ -2,7 +2,7 @@
   "name": "ts-chas",
   "repository": "github:sinzek/chas",
   "homepage": "https://docs.cbrock.dev",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "module",
   "description": "A functional programming and utility library for TypeScript that provides tools for explicit error handling, runtime validation, and asynchronous operations.",
   "keywords": [
@@ -106,7 +106,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && pnpm run build:dts",
+    "build:dts": "tsc --project tsconfig.build.json --declaration --emitDeclarationOnly --outDir dist && pnpm run build:dts:cjs",
+    "build:dts:cjs": "find dist -name \"*.d.ts\" -exec sh -c 'cp \"$1\" \"${1%.d.ts}.d.cts\"' _ {} \\;",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --fix",
