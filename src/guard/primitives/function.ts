@@ -3,6 +3,11 @@ import { AggregateGuardError } from '../schema.js';
 import { ok, err, type Result, ResultAsync } from '../../result/result.js';
 import { GlobalErrs } from '../../tagged-errs.js';
 
+export type FunctionGuard<Input extends Guard<any>[], Output extends Guard<any> | undefined> = Guard<
+	(...args: { [K in keyof Input]: InferGuard<Input[K]> }) => Output extends Guard<any> ? InferGuard<Output> : unknown,
+	FunctionHelpers<Input, Output>
+>;
+
 export interface FunctionGuardFactory {
 	/**
 	 * Creates a function guard that checks if a value is a function.
@@ -50,9 +55,7 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 		) => Promise<Output extends Guard<any> ? InferGuard<Output> : any>,
 	>(
 		fn: F
-	) => (
-		...args: Parameters<F>
-	) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
+	) => (...args: Parameters<F>) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
 
 	/**
 	 * Similar to `.impl`, but instead of throwing an `AggregateGuardError`, returns a `Result<T, AggregateGuardError>`.

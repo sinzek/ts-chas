@@ -51,14 +51,16 @@ const mapHelpers: MapHelpers<any, any> = {
 // Factory
 // ---------------------------------------------------------------------------
 
+export type MapGuard<K, V> = Guard<Map<K, V>, MapHelpers<K, V>>;
+
 export interface MapGuardFactory {
 	/** Creates an unnarrowed Map guard (any key/value types). */
-	(): Guard<Map<unknown, unknown>, MapHelpers<unknown, unknown>>;
+	(): MapGuard<unknown, unknown>;
 	/** Creates a Map guard with typed keys and values. */
 	<KG extends Guard<any, any>, VG extends Guard<any, any>>(
 		keyGuard: KG,
 		valueGuard: VG
-	): Guard<Map<InferGuard<KG>, InferGuard<VG>>, MapHelpers<InferGuard<KG>, InferGuard<VG>>>;
+	): MapGuard<InferGuard<KG>, InferGuard<VG>>;
 }
 
 export const MapGuardFactory: MapGuardFactory = (

@@ -94,13 +94,15 @@ const resultHelpers: ResultHelpers = {
 
 export interface ResultGuardFactory {
 	/** Creates an unnarrowed Result guard. */
-	(): Guard<Result<unknown, unknown>, ResultHelpers>;
+	(): ResultGuard<unknown, unknown>;
 	/** Creates a Result guard narrowed by Ok value and Err error types. */
 	<OkG extends Guard<any, any>, ErrG extends Guard<any, any>>(
 		okGuard: OkG,
 		errGuard: ErrG
-	): Guard<Result<InferGuard<OkG>, InferGuard<ErrG>>, ResultHelpers<InferGuard<OkG>, InferGuard<ErrG>>>;
+	): ResultGuard<InferGuard<OkG>, InferGuard<ErrG>>;
 }
+
+export type ResultGuard<T, E> = Guard<Result<T, E>, ResultHelpers<T, E>>;
 
 export const ResultGuardFactory: ResultGuardFactory = (
 	okGuard?: Guard<any, Record<string, any>>,

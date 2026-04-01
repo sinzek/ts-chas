@@ -2,11 +2,13 @@ import { type Guard, type InferGuard, makeGuard } from '../shared.js';
 import { objectHelpers, type ObjectHelpers } from './shared.js';
 
 export interface ObjectGuardFactory {
-	(): Guard<object, ObjectHelpers<object>>;
+	(): ObjectGuard<object>;
 	<S extends Record<string, Guard<any, Record<string, any>>>>(
 		schema: S
-	): Guard<{ [K in keyof S]: InferGuard<S[K]> }, ObjectHelpers<{ [K in keyof S]: InferGuard<S[K]> }>>;
+	): ObjectGuard<{ [K in keyof S]: InferGuard<S[K]> }>;
 }
+
+export type ObjectGuard<T extends object = Record<string, any>> = Guard<T, ObjectHelpers<T>>;
 
 export const ObjectGuardFactory: ObjectGuardFactory = (...args: any[]) => {
 	const schema: Record<string, Guard<any, Record<string, any>>> | undefined = args[0];

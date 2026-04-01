@@ -128,8 +128,10 @@ const urlHelpers: UrlHelpers = {
 	}),
 };
 
+export type UrlGuard = Guard<string, UrlHelpers>;
+
 export interface UrlGuardFactory {
-	(options?: { hostname?: RegExp; protocol?: RegExp }): Guard<string, UrlHelpers>;
+	(options?: { hostname?: RegExp; protocol?: RegExp }): UrlGuard;
 }
 
 export const UrlGuardFactory: UrlGuardFactory = (options?: { hostname?: RegExp; protocol?: RegExp }) =>

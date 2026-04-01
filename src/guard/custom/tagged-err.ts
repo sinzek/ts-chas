@@ -44,6 +44,8 @@ type InferFactoriesUnion<T extends Record<string, ErrorFactory>> = T[keyof T] ex
 		: never
 	: never;
 
+export type TaggedErrGuard<T extends string> = Guard<TaggedErr & { readonly _tag: T }>;
+
 export interface TaggedErrGuardFactory {
 	/**
 	 * Creates a guard using a single error factory from `defineErrs`.
@@ -84,7 +86,7 @@ export interface TaggedErrGuardFactory {
 	 * }
 	 * ```
 	 */
-	<Tag extends string>(tag: Tag): Guard<TaggedErr & { readonly _tag: Tag }>;
+	<Tag extends string>(tag: Tag): TaggedErrGuard<Tag>;
 }
 
 export const TaggedErrGuardFactory: TaggedErrGuardFactory = (
@@ -101,18 +103,15 @@ export const TaggedErrGuardFactory: TaggedErrGuardFactory = (
 	// Single factory — has .is() directly as a type guard function
 	if ('is' in tagOrFactory && typeof (tagOrFactory as ErrorFactory).is === 'function') {
 		const factory = tagOrFactory as ErrorFactory;
-		return makeGuard(
-			(v: unknown): v is any => !!factory.is(v),
-			{ name: `tagged(factory)`, id: 'tagged' }
-		);
+		return makeGuard((v: unknown): v is any => !!factory.is(v), { name: `tagged(factory)`, id: 'tagged' });
 	}
 
 	// Factories map — check all variants
 	const map = tagOrFactory as Record<string, ErrorFactory>;
 	const factories = Object.values(map);
 	const tags = Object.keys(map);
-	return makeGuard(
-		(v: unknown): v is any => factories.some((f) => !!f.is(v)),
-		{ name: `tagged(${tags.join(' | ')})`, id: 'tagged' }
-	);
+	return makeGuard((v: unknown): v is any => factories.some(f => !!f.is(v)), {
+		name: `tagged(${tags.join(' | ')})`,
+		id: 'tagged',
+	});
 };

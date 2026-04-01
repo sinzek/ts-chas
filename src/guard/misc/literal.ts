@@ -1,9 +1,12 @@
 import { makeGuard, type Guard } from '../shared.js';
 
+export type LiteralGuard<T extends (string | number | boolean | bigint | null | undefined)[]> = Guard<
+	T[number],
+	typeof literalHelpers
+>;
+
 export interface LiteralGuardFactory {
-	<T extends (string | number | boolean | bigint | null | undefined)[]>(
-		...values: T
-	): Guard<T[number], typeof literalHelpers>;
+	<T extends (string | number | boolean | bigint | null | undefined)[]>(...values: T): LiteralGuard<T>;
 }
 
 const literalHelpers = {};

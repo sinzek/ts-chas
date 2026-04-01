@@ -1,5 +1,10 @@
 import { makeGuard, type Guard, type InferGuard } from '../shared.js';
 
+export type InstanceofGuard<T extends object, S extends Partial<Record<keyof T, any>> = {}> = Guard<
+	T & { [K in keyof S]: InferGuard<S[K]> },
+	typeof instanceofHelpers
+>;
+
 export interface InstanceofGuardFactory {
 	/**
 	 * Creates a Guard that validates that a value is an instance of the given constructor.
@@ -9,10 +14,10 @@ export interface InstanceofGuardFactory {
 	 * @example
 	 * is.instanceof(URL, { protocol: is.literal('https:') });
 	 */
-	<T, S extends Partial<Record<keyof T, any>> = {}>(
+	<T extends object, S extends Partial<Record<keyof T, any>> = {}>(
 		ctor: abstract new (...args: any[]) => T,
 		schema?: S
-	): Guard<T & { [K in keyof S]: InferGuard<S[K]> }, typeof instanceofHelpers>;
+	): InstanceofGuard<T, S>;
 }
 
 const instanceofHelpers = {};

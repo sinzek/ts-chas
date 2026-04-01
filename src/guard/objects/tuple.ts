@@ -1,5 +1,10 @@
 import { makeGuard, type Guard, type InferGuard, arrayHelpers } from '../shared.js';
 
+export type TupleGuard<G extends readonly Guard<any, Record<string, any>>[]> = Guard<
+	{ [K in keyof G]: InferGuard<G[K]> },
+	TupleHelpers<{ [K in keyof G]: InferGuard<G[K]> }>
+>;
+
 export interface TupleGuardFactory {
 	/**
 	 * Creates a fixed-length tuple guard.
@@ -13,9 +18,7 @@ export interface TupleGuardFactory {
 	 * }
 	 * ```
 	 */
-	<G extends readonly Guard<any, Record<string, any>>[]>(
-		guards: [...G]
-	): Guard<{ [K in keyof G]: InferGuard<G[K]> }, TupleHelpers<{ [K in keyof G]: InferGuard<G[K]> }>>;
+	<G extends readonly Guard<any, Record<string, any>>[]>(guards: [...G]): TupleGuard<G>;
 
 	/**
 	 * Creates a variadic tuple guard.
@@ -39,7 +42,7 @@ export interface TupleGuardFactory {
 	>;
 }
 
-interface TupleHelpers<T extends readonly any[]> {
+export interface TupleHelpers<T extends readonly any[]> {
 	/** Validates that the tuple is non-empty. */
 	nonEmpty: Guard<T, TupleHelpers<T>>;
 	/** Validates that all elements in the tuple are unique (deep equality). */

@@ -1,8 +1,10 @@
 import { type Guard, makeGuard } from '../shared.js';
 
+export type CustomGuard<T> = Guard<T>;
+
 export interface CustomGuardFactory {
-	<T>(fn: ((v: unknown) => boolean) | ((v: unknown) => v is T)): Guard<T>;
-	(): Guard<unknown>;
+	<T>(fn: ((v: unknown) => boolean) | ((v: unknown) => v is T)): CustomGuard<T>;
+	(): CustomGuard<unknown>;
 }
 
 export const CustomGuardFactory: CustomGuardFactory = (fn?: (v: unknown) => boolean) =>

@@ -70,11 +70,13 @@ const setHelpers: SetHelpers<any> = {
 // Factory
 // ---------------------------------------------------------------------------
 
+export type SetGuard<T> = Guard<Set<T>, SetHelpers<T>>;
+
 export interface SetGuardFactory {
 	/** Creates an unnarrowed Set guard (any value type). */
-	(): Guard<Set<unknown>, SetHelpers<unknown>>;
+	(): SetGuard<unknown>;
 	/** Creates a Set guard with typed values. */
-	<G extends Guard<any, any>>(valueGuard: G): Guard<Set<InferGuard<G>>, SetHelpers<InferGuard<G>>>;
+	<G extends Guard<any, any>>(valueGuard: G): SetGuard<InferGuard<G>>;
 }
 
 export const SetGuardFactory: SetGuardFactory = (valueGuard?: Guard<any, Record<string, any>>) =>

@@ -2,13 +2,13 @@ import { makeGuard, arrayHelpers, type ArrayHelpers, type Guard, type InferGuard
 
 export type { ArrayHelpers };
 
+export type ArrayGuard<G extends Guard<any, Record<string, any>>[]> = Guard<
+	G extends [] ? unknown[] : InferGuard<G[number]>[],
+	ArrayHelpers<G extends [] ? unknown : InferGuard<G[number]>>
+>;
+
 export interface ArrayGuardFactory {
-	<G extends Guard<any, Record<string, any>>[]>(
-		...guards: G
-	): Guard<
-		G extends [] ? unknown[] : InferGuard<G[number]>[],
-		ArrayHelpers<G extends [] ? unknown : InferGuard<G[number]>>
-	>;
+	<G extends Guard<any, Record<string, any>>[]>(...guards: G): ArrayGuard<G>;
 }
 
 export const ArrayGuardFactory: ArrayGuardFactory = <G extends Guard<any, Record<string, any>>[]>(...guards: G) =>
@@ -19,15 +19,16 @@ export const ArrayGuardFactory: ArrayGuardFactory = <G extends Guard<any, Record
 			name: `array<${guards.map(guard => guard.meta.name).join(', ')}>`,
 			id: 'array',
 			elementGuards: guards.length > 0 ? guards : undefined,
-			transform: guards.length > 0
-				? (v: any) => {
-						if (!Array.isArray(v)) return v;
-						return v.map(item => {
-							const g = guards.find(g => g(item));
-							return g?.meta.transform ? g.meta.transform(item, item) : item;
-						});
-					}
-				: undefined,
+			transform:
+				guards.length > 0
+					? (v: any) => {
+							if (!Array.isArray(v)) return v;
+							return v.map(item => {
+								const g = guards.find(g => g(item));
+								return g?.meta.transform ? g.meta.transform(item, item) : item;
+							});
+						}
+					: undefined,
 		},
 		arrayHelpers
 	);

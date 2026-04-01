@@ -1,12 +1,14 @@
 import { makeGuard, type Guard, type InferGuard } from '../shared.js';
 
+export type XorGuard<T extends Guard<any, any>[]> = Guard<InferGuard<T[number]>, typeof xorHelpers>;
+
 export interface XorGuardFactory {
 	/**
 	 * Creates a guard that passes when **exactly one** of the provided guards matches.
 	 * Unlike `union` (which passes if *any* guard matches), `xor` rejects values
 	 * that satisfy multiple guards simultaneously.
 	 */
-	<T extends Guard<any, any>[]>(...guards: T): Guard<InferGuard<T[number]>, typeof xorHelpers>;
+	<T extends Guard<any, any>[]>(...guards: T): XorGuard<T>;
 }
 
 const xorHelpers = {};

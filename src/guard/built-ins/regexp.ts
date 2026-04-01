@@ -1,7 +1,9 @@
 import { makeGuard, type Guard, factory } from '../shared.js';
 
+export type RegExpGuard = Guard<RegExp, RegExpHelpers>;
+
 export interface RegExpGuardFactory {
-	(options?: { pattern?: string | RegExp; flags?: string }): Guard<RegExp, RegExpHelpers>;
+	(options?: { pattern?: string | RegExp; flags?: string }): RegExpGuard;
 }
 
 export interface RegExpHelpers {

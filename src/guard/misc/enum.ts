@@ -8,9 +8,11 @@ export interface EnumHelpers<T> {
 	extract: <U extends T>(...values: readonly U[]) => Guard<Extract<T, U>, EnumHelpers<Extract<T, U>>>;
 }
 
+export type EnumGuard<T> = Guard<T, EnumHelpers<T>>;
+
 export interface EnumGuardFactory {
-	<T extends string | number | symbol>(values: readonly T[]): Guard<T, EnumHelpers<T>>;
-	<T extends Record<string, string | number | symbol>>(values: T): Guard<T[keyof T], EnumHelpers<T[keyof T]>>;
+	<T extends string | number | symbol>(values: readonly T[]): EnumGuard<T>;
+	<T extends Record<string, string | number | symbol>>(values: T): EnumGuard<T[keyof T]>;
 }
 
 const enumHelpers: EnumHelpers<any> = {

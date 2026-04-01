@@ -1,6 +1,8 @@
 import { makeGuard, type Guard } from '../shared.js';
 import { type ObjectHelpers, objectHelpers } from './shared.js';
 
+export type RecordGuard<K extends string | number | symbol, V> = Guard<Record<K, V>, ObjectHelpers<Record<K, V>>>;
+
 /**
  * Creates a Guard that validates an object as a `Record<K, V>`.
  *
@@ -45,7 +47,7 @@ export interface RecordGuardFactory {
 	<K extends string | number | symbol, V>(
 		keyGuard: Guard<K>,
 		valGuard: Guard<V, Record<string, any>>
-	): Guard<Record<K, V>, ObjectHelpers<Record<K, V>>>;
+	): RecordGuard<K, V>;
 }
 
 export const RecordGuardFactory: RecordGuardFactory = <K extends string | number | symbol, V>(

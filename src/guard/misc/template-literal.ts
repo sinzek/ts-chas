@@ -13,8 +13,10 @@ type InferTemplateLiteral<T extends readonly TemplatePart[]> = T extends readonl
 				: never
 		: string;
 
+export type TemplateLiteralGuard<T extends readonly TemplatePart[]> = Guard<InferTemplateLiteral<T>>;
+
 export interface TemplateLiteralGuardFactory {
-	<const T extends readonly TemplatePart[]>(...parts: T): Guard<InferTemplateLiteral<T>>;
+	<const T extends readonly TemplatePart[]>(...parts: T): TemplateLiteralGuard<T>;
 }
 
 const templateLiteralHelpers = {};
