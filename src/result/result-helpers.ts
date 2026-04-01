@@ -552,26 +552,72 @@ export const partitionAsync = async <T, E>(
  * Since a `Result` can be cleanly serialized to `{ "ok": true|false,
  * "value|error": ... }`, this allows you to "revive" those methods.
  *
- * Note: Throws `ChasErr` if `parsedJson` is not a Result
+ * Note: Throws `ChasErr` if `parsedJson` is not of the shape { ok: boolean }
  *
  * @example
  * ```ts
- * const safeData = chas.reattachResultMethods(await response.json());
+ * const safeData = chas.revive(await response.json());
  * ```
  */
-export const reattachResultMethods = <T, E>(parsedJson: unknown): Result<T, E> => {
-	if (!parsedJson || typeof parsedJson !== 'object' || !('ok' in parsedJson) || typeof parsedJson.ok !== 'boolean') {
+export function revive<T, E>(parsedJson: Result<T, E> | (() => Result<T, E>)): Result<T, E>;
+export function revive<T, E = never>(parsedJson: { ok: true; value: T } | (() => { ok: true; value: T })): Result<T, E>;
+export function revive<E, T = never>(parsedJson: { ok: false; error: E } | (() => { ok: false; error: E })): Result<T, E>;
+export function revive<T, E>(parsedJson: { ok: boolean; value: T; error: E } | (() => { ok: boolean; value: T; error: E })): Result<T, E>;
+export function revive<T, E = never>(parsedJson: { ok: boolean; value: T } | (() => { ok: boolean; value: T })): Result<T, E>;
+export function revive<E, T = never>(parsedJson: { ok: boolean; error: E } | (() => { ok: boolean; error: E })): Result<T, E>;
+export function revive<T = undefined, E = never>(parsedJson: { ok: true } | (() => { ok: true })): Result<T, E>;
+export function revive<E = undefined, T = never>(parsedJson: { ok: false } | (() => { ok: false })): Result<T, E>;
+export function revive<T = unknown, E = unknown>(parsedJson: { ok: boolean; value?: T; error?: E } | (() => { ok: boolean; value?: T; error?: E })): Result<T, E>;
+export function revive<T = unknown, E = unknown>(parsedJson: unknown | (() => unknown)): Result<T, E>;
+export function revive(parsedJson: any): any {
+	let json = parsedJson;
+	if (typeof json === 'function') {
+		json = json();
+	}
+	if (!json || typeof json !== 'object' || !('ok' in json) || typeof json.ok !== 'boolean') {
 		throw GlobalErrs.ChasErr({
-			message: 'Invalid Result object in chas.revive, got ' + JSON.stringify(parsedJson),
+			message: '[ts-chas] Invalid Result object in chas.revive, got ' + JSON.stringify(json),
 			origin: 'chas.revive',
-			cause: parsedJson,
+			cause: json,
 		});
 	}
 
+	if ('isOk' in json && typeof (json as any).isOk === 'function') {
+		return json as any;
+	}
+
 	const result = Object.create(ResultMethodsProto);
-	Object.assign(result, parsedJson);
+	Object.assign(result, json);
 	return result;
-};
+}
+
+/**
+ * Re-attaches a `ResultAsync` object's methods if they were stripped.
+ * Since a `ResultAsync` can be cleanly serialized to `{ "ok": true|false,
+ * "value|error": ... }`, this allows you to "revive" those methods.
+ *
+ * Note: Throws `ChasErr` if the evaluated promise is not of the shape { ok: boolean }
+ *
+ * @example
+ * ```ts
+ * const safeData = chas.reviveAsync(await response.json());
+ * ```
+ */
+export function reviveAsync<T, E>(promise: PromiseLike<Result<T, E>> | (() => PromiseLike<Result<T, E>>) | ResultAsync<T, E> | (() => ResultAsync<T, E>) | PromiseLike<ResultAsync<T, E>> | (() => PromiseLike<ResultAsync<T, E>>)): ResultAsync<T, E>;
+export function reviveAsync<T, E = never>(promise: PromiseLike<{ ok: true; value: T }> | (() => PromiseLike<{ ok: true; value: T }>) | (() => { ok: true; value: T })): ResultAsync<T, E>;
+export function reviveAsync<E, T = never>(promise: PromiseLike<{ ok: false; error: E }> | (() => PromiseLike<{ ok: false; error: E }>) | (() => { ok: false; error: E })): ResultAsync<T, E>;
+export function reviveAsync<T, E>(promise: PromiseLike<{ ok: boolean; value: T; error: E }> | (() => PromiseLike<{ ok: boolean; value: T; error: E }>) | (() => { ok: boolean; value: T; error: E })): ResultAsync<T, E>;
+export function reviveAsync<T, E = never>(promise: PromiseLike<{ ok: boolean; value: T }> | (() => PromiseLike<{ ok: boolean; value: T }>) | (() => { ok: boolean; value: T })): ResultAsync<T, E>;
+export function reviveAsync<E, T = never>(promise: PromiseLike<{ ok: boolean; error: E }> | (() => PromiseLike<{ ok: boolean; error: E }>) | (() => { ok: boolean; error: E })): ResultAsync<T, E>;
+export function reviveAsync<T = undefined, E = never>(promise: PromiseLike<{ ok: true }> | (() => PromiseLike<{ ok: true }>) | (() => { ok: true })): ResultAsync<T, E>;
+export function reviveAsync<E = undefined, T = never>(promise: PromiseLike<{ ok: false }> | (() => PromiseLike<{ ok: false }>) | (() => { ok: false })): ResultAsync<T, E>;
+export function reviveAsync<T = unknown, E = unknown>(promise: PromiseLike<{ ok: boolean; value?: T; error?: E }> | (() => PromiseLike<{ ok: boolean; value?: T; error?: E }>) | (() => { ok: boolean; value?: T; error?: E })): ResultAsync<T, E>;
+export function reviveAsync<T = unknown, E = unknown>(promise: PromiseLike<unknown> | (() => PromiseLike<unknown>) | unknown | (() => unknown)): ResultAsync<T, E>;
+export function reviveAsync(promise: any): any {
+	const p = typeof promise === 'function' ? promise() : promise;
+
+	return new ResultAsync(Promise.resolve(p).then(res => revive(res) as any));
+}
 
 /**
  * Wraps an asynchronous function with resilience logic (retries and timeouts),

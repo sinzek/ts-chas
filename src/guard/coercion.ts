@@ -1,3 +1,5 @@
+import { revive } from '../result/result-helpers.js';
+
 /**
  * Default coercion logic for core types.
  *
@@ -7,10 +9,10 @@
  */
 export const COERCERS: Record<string, (v: unknown) => unknown> = {
 	/** Coerces numbers, booleans, and Dates to their string representation. */
-	string: (v) => (v instanceof Date ? v.toISOString() : String(v)),
+	string: v => (v instanceof Date ? v.toISOString() : String(v)),
 
 	/** Coerces numeric strings, booleans, and Dates to numbers. */
-	number: (v) => {
+	number: v => {
 		if (typeof v === 'string') {
 			const trimmed = v.trim();
 			if (trimmed === '') return 0;
@@ -26,7 +28,7 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 	 * Coerces strings and numbers to booleans using common truthy/falsy patterns.
 	 * Unlike Boolean(), it recognizes "false", "0", and "no" as false.
 	 */
-	boolean: (v) => {
+	boolean: v => {
 		if (typeof v === 'string') {
 			const s = v.toLowerCase().trim();
 			if (['true', '1', 'yes', 'on', 'active', 'enabled'].includes(s)) return true;
@@ -38,7 +40,7 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 	},
 
 	/** Coerces ISO strings or timestamps to Date objects. */
-	date: (v) => {
+	date: v => {
 		if (typeof v === 'string' || typeof v === 'number') {
 			const d = new Date(v);
 			return Number.isNaN(d.getTime()) ? v : d;
@@ -47,7 +49,7 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 	},
 
 	/** Coerces strings or numbers to BigInts. Returns original if BigInt() throws. */
-	bigint: (v) => {
+	bigint: v => {
 		if (typeof v === 'string' || typeof v === 'number') {
 			try {
 				return BigInt(v);
@@ -59,7 +61,7 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 	},
 
 	/** Attempts to parse a string as JSON if it looks like an object or array. */
-	object: (v) => {
+	object: v => {
 		if (typeof v === 'string') {
 			const trimmed = v.trim();
 			if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -74,5 +76,17 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 	},
 
 	/** Identical to object coercion (both are standard JSON parsing). */
-	array: (v) => COERCERS['object']!(v),
+	array: v => COERCERS['object']!(v),
+
+	/** Revives a stripped Result POJO back into a fully-featured Result class. */
+	result: v => {
+		try {
+			if (v && typeof v === 'object' && 'ok' in v && typeof v.ok === 'boolean') {
+				return revive(v);
+			}
+		} catch {
+			// Ignore ChasErrs thrown by revive if it's deeply malformed
+		}
+		return v;
+	},
 };

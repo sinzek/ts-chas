@@ -105,7 +105,7 @@ export type GuardMeta = {
 	 * @param v - The (possibly already-transformed) value from the previous step.
 	 * @param original - The original raw input, preserved for helpers like `.extend()`.
 	 */
-	transform?: (v: any, original: any) => any;
+	transform?: ((v: any, original: any) => any) | undefined;
 	/** Index signature for custom metadata fields. Access with bracket notation. */
 	[key: string]: any;
 };
@@ -480,7 +480,7 @@ export interface TransformerResult<T, H> {
 	 * // 4. Validate that the result is an email
 	 * ```
 	 */
-	transform?: (v: any, original: any) => any;
+	transform?: ((v: any, original: any) => any) | undefined;
 	/**
 	 * If `true`, `helpers` completely replaces the current helper context
 	 * instead of merging with it.
@@ -928,6 +928,7 @@ const universalHelpers: Record<string, any> = {
 			return other(transformed);
 		},
 		meta: { name: `${target.meta.name}.and(${other.meta?.name ?? '?'})` },
+		transform: other.meta.transform ? (v: unknown) => other.meta.transform!(v, v) : undefined,
 	})),
 
 	or: transformer((target, other: Guard<any, Record<string, any>>) => ({
@@ -980,8 +981,7 @@ const universalHelpers: Record<string, any> = {
 				id: 'array',
 				elementGuards: [target],
 			},
-			transform: (v: any[]) =>
-				v.map(item => (target.meta.transform ? target.meta.transform(item, item) : item)),
+			transform: (v: any[]) => v.map(item => (target.meta.transform ? target.meta.transform(item, item) : item)),
 			helpers: arrayHelpers,
 			replaceHelpers: true,
 		}))
@@ -1014,7 +1014,10 @@ const universalHelpers: Record<string, any> = {
 					return target(val);
 				},
 				meta: { name: `${target.meta.name}.coerce` },
-				transform: (v: unknown) => (coercer ? coercer(v) : v),
+				transform: (v: unknown) => {
+					const coerced = coercer ? coercer(v) : v;
+					return target.meta.transform ? target.meta.transform(coerced, coerced) : coerced;
+				},
 			};
 		})
 	),
@@ -1082,8 +1085,8 @@ export function createProxy<T, H extends Record<string, any>>(
 			if (prop === '$infer') {
 				throw GlobalErrs.ChasErr({
 					message:
-						`[ts-chas] The .infer property is a type-level helper and cannot be accessed at runtime. ` +
-						`Use it only with 'typeof' (e.g., type T = typeof guard.infer).`,
+						`[ts-chas] The .$infer property is a type-level helper and cannot be accessed at runtime. ` +
+						`Use it only with 'typeof' (e.g., type T = typeof guard.$infer).`,
 					origin: 'infer',
 				});
 			}
@@ -1188,10 +1191,12 @@ export function createProxy<T, H extends Record<string, any>>(
 							...result.meta,
 							transform: result.transform
 								? (v: any, original: any) => {
-										const parentVal = target.meta.transform ? target.meta.transform(v, original) : v;
+										const parentVal = target.meta.transform
+											? target.meta.transform(v, original)
+											: v;
 										const newVal = result.transform!(parentVal, original);
 										return newVal;
-								  }
+									}
 								: target.meta.transform,
 						} as GuardMeta,
 					});

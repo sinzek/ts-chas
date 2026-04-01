@@ -25,12 +25,14 @@ export type Result<T, E> = (Ok<T> & ResultMethods<T, E>) | (Err<E> & ResultMetho
  * // result is Ok(42)
  * ```
  */
-export const ok = <T, E = never>(value: T): Result<T, E> => {
+export function ok<E = never>(): Result<undefined, E>;
+export function ok<T, E = never>(value: T): Result<T, E>;
+export function ok<T, E = never>(value?: T): Result<T, E> {
 	const result = Object.create(ResultMethodsProto);
 	result.ok = true;
 	result.value = value;
 	return result;
-};
+}
 
 /**
  * Creates a `Result` from an error.
@@ -44,12 +46,14 @@ export const ok = <T, E = never>(value: T): Result<T, E> => {
  * // result is Err('Something went wrong')
  * ```
  */
-export const err = <E = unknown, T = never>(error: E): Result<T, E> => {
+export function err<T = never>(): Result<T, undefined>;
+export function err<E = unknown, T = never>(error: E): Result<T, E>;
+export function err<E = unknown, T = never>(error?: E): Result<T, E> {
 	const result = Object.create(ResultMethodsProto);
 	result.ok = false;
 	result.error = error;
 	return result;
-};
+}
 
 /**
  * Creates a Result Async from a value or promise.

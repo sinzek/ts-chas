@@ -126,4 +126,33 @@ describe('Guard Coercion', () => {
 			expect(guard.parse('not-a-number').isOk()).toBe(false);
 		});
 	});
+
+	describe('is.result().coerce', () => {
+		it('revives stripped POJO Ok Results seamlessly', () => {
+			const guard = is.result(is.number, is.unknown).coerce;
+			const res = guard.parse({ ok: true, value: 42 });
+			
+			expect(res.isOk()).toBe(true);
+			const revived = res.unwrap();
+			expect(revived.isOk()).toBe(true);
+			expect(revived.unwrap()).toBe(42);
+			expect(typeof revived.map).toBe('function'); // Verified methods are there
+		});
+
+		it('revives stripped POJO Err Results seamlessly', () => {
+			const guard = is.result(is.unknown, is.string).coerce;
+			const res = guard.parse({ ok: false, error: 'failure' });
+			
+			expect(res.isOk()).toBe(true);
+			const revived = res.unwrap();
+			expect(revived.isErr()).toBe(true);
+			expect(revived.unwrapErr()).toBe('failure');
+		});
+
+		it('gracefully falls back and fails validation on non-objects', () => {
+			const guard = is.result().coerce;
+			expect(guard.parse('not an object').isOk()).toBe(false);
+			expect(guard.parse(null).isOk()).toBe(false);
+		});
+	});
 });

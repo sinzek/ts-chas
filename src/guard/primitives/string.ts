@@ -870,7 +870,12 @@ const stringHelpers: StringHelpers = {
 				}
 			},
 			meta: { name: `${target.meta.name}.parsedJson` },
-			transform: (v: string) => JSON.parse(v),
+			transform: (v: string) => {
+				const parsed = JSON.parse(v);
+				return options?.schema?.meta.transform
+					? options.schema.meta.transform(parsed, parsed)
+					: parsed;
+			},
 			helpers: {},
 			replaceHelpers: true,
 		})
