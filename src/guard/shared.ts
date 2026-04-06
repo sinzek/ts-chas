@@ -1222,8 +1222,9 @@ export function createProxy<T, H extends Record<string, any>>(
 					const predicate = helper(...args);
 					const next = Object.assign(
 						(v: unknown): v is T => {
+							if (!target(v)) return false;
 							const transformed = target.meta.transform ? target.meta.transform(v, v) : v;
-							return target(v) && predicate(transformed);
+							return predicate(transformed);
 						},
 						{
 							meta: {
@@ -1239,8 +1240,9 @@ export function createProxy<T, H extends Record<string, any>>(
 			// 4. Value helpers — simple predicates, compose immediately
 			const next = Object.assign(
 				(v: unknown): v is T => {
+					if (!target(v)) return false;
 					const transformed = target.meta.transform ? target.meta.transform(v, v) : v;
-					return target(v) && helper(transformed);
+					return helper(transformed);
 				},
 				{
 					meta: { ...target.meta, name: `${target.meta.name}.${String(prop)}` },

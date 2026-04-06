@@ -370,6 +370,27 @@ describe('is.object (v2)', () => {
 		});
 	});
 
+	describe('field guards with transforms on missing keys', () => {
+		it('returns GuardErr (not TypeError) when a factory-helper guard has a transform and the key is missing', () => {
+			const guard = is.object({ name: is.string.trim().min(1) });
+			expect(() => guard.parse({})).not.toThrow();
+			expect(guard.parse({}).isErr()).toBe(true);
+		});
+
+		it('returns GuardErr (not TypeError) when a value-helper guard has a transform and the key is missing', () => {
+			const guard = is.object({ email: is.string.trim().email });
+			expect(() => guard.parse({})).not.toThrow();
+			expect(guard.parse({}).isErr()).toBe(true);
+		});
+
+		it('still validates and transforms correctly when the key is present', () => {
+			const guard = is.object({ name: is.string.trim().min(1) });
+			expect(guard.parse({ name: '  hello  ' }).isOk()).toBe(true);
+			expect(guard.parse({ name: '  hello  ' }).unwrap()).toEqual({ name: 'hello' });
+			expect(guard.parse({ name: '   ' }).isErr()).toBe(true); // trims to empty, fails min(1)
+		});
+	});
+
 	describe('readonly', () => {
 		it('basic readonly validation', () => {
 			const guard = is
