@@ -1,4 +1,4 @@
-import { makeGuard, type Guard, property, transformer } from '../shared.js';
+import { makeGuard, type Guard, property, transformer, JSON_SCHEMA } from '../shared.js';
 
 export interface BooleanHelpers {
 	/** Validates that the boolean is strictly true. */
@@ -17,12 +17,16 @@ const booleanHelpers: BooleanHelpers = {
 	asString: property(
 		transformer((target: Guard<boolean>) => ({
 			fn: (v: unknown): v is boolean => target(v),
-			meta: { name: `${target.meta.name}.asString`, id: 'string' },
+			meta: { name: `${target.meta.name}.asString`, id: 'string', jsonSchema: { enum: ['true', 'false'] } },
 			transform: (v: boolean) => String(v),
 			replaceHelpers: true,
 		}))
 	) as any,
 };
+
+// JSON Schema contributions for boolean helpers
+(booleanHelpers.true as any)[JSON_SCHEMA] = () => ({ const: true });
+(booleanHelpers.false as any)[JSON_SCHEMA] = () => ({ const: false });
 
 export const BooleanGuard: BooleanGuard = makeGuard(
 	(v: unknown): v is boolean => typeof v === 'boolean',

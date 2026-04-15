@@ -78,7 +78,7 @@ export const RecordGuardFactory: RecordGuardFactory = <K extends string | number
 			}
 			return true;
 		},
-		{ name: `record<${keyGuard.meta.name}, ${valGuard.meta.name}>`, id: 'record' },
+		{ name: `record<${keyGuard.meta.name}, ${valGuard.meta.name}>`, id: 'record', keyGuard, valueGuard: valGuard },
 		objectHelpers as any
 	);
 };

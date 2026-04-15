@@ -938,7 +938,11 @@ export const ResultMethodsProto = {
 	unwrapErr<T, E, V extends Error>(this: Result<T, E>, error?: V): E {
 		if (!this.ok) return this.error;
 		if (error) throw error;
-		throw GlobalErrs.ChasErr({ message: 'Called unwrapErr on an Ok', origin: 'Result.unwrapErr', cause: this });
+		throw GlobalErrs.ChasErr({
+			message: '[ts-chas] Called unwrapErr on an Ok',
+			origin: 'Result.unwrapErr',
+			cause: this,
+		});
 	},
 	unwrapOr<T, E, T2 = T>(this: Result<T, E>, defaultValue: T2): T | T2 {
 		return this.ok ? this.value : defaultValue;

@@ -3,6 +3,88 @@ import { GlobalErrs, type InferErr } from '../tagged-errs.js';
 import { deepEqual, safeStringify } from '../utils.js';
 import type { StandardSchemaV1 } from '../standard-schema.js';
 import { COERCERS } from './coercion.js';
+import { arbitraryTerminal, generateTerminal } from './generate.js';
+import { AsyncGuard } from './async.js';
+
+// ---------------------------------------------------------------------------
+// JSON Schema types
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal structural type for a fast-check `Arbitrary<T>`.
+ *
+ * Defined locally so `.arbitrary()` is strongly typed without requiring
+ * fast-check to be installed as a hard dependency.
+ */
+export type Arbitrary<T> = {
+	filter(predicate: (value: T) => boolean): Arbitrary<T>;
+	map<U>(mapper: (value: T) => U): Arbitrary<U>;
+	chain<U>(chainer: (value: T) => Arbitrary<U>): Arbitrary<U>;
+	generate(mrng: any, biasFactor: number | undefined): any;
+	canShrinkWithoutContext: any;
+	shrink(value: T): any;
+	[k: string]: unknown;
+};
+
+/**
+ * A JSON Schema Draft-07 compatible node.
+ *
+ * Used as the return type of `.toJsonSchema()` and as the type for
+ * accumulated constraint metadata stored in `guard.meta.jsonSchema`.
+ */
+export type JsonSchemaNode = {
+	type?: string | string[];
+	format?: string;
+	minimum?: number;
+	maximum?: number;
+	exclusiveMinimum?: number | boolean;
+	exclusiveMaximum?: number | boolean;
+	minLength?: number;
+	maxLength?: number;
+	minItems?: number;
+	maxItems?: number;
+	pattern?: string;
+	enum?: unknown[];
+	const?: unknown;
+	properties?: Record<string, JsonSchemaNode>;
+	required?: string[];
+	items?: JsonSchemaNode;
+	additionalProperties?: boolean | JsonSchemaNode;
+	oneOf?: JsonSchemaNode[];
+	anyOf?: JsonSchemaNode[];
+	allOf?: JsonSchemaNode[];
+	not?: JsonSchemaNode;
+	$ref?: string;
+	$defs?: Record<string, JsonSchemaNode>;
+	description?: string;
+	title?: string;
+	default?: unknown;
+	multipleOf?: number;
+	minProperties?: number;
+	maxProperties?: number;
+	uniqueItems?: boolean;
+	/** @internal Tracks nullability for `.nullable` / `.nullish` — removed before final output. */
+	_nullable?: boolean;
+	/** @internal Tracks optionality for `.optional` / `.nullish` — used by parent object to omit from required. */
+	_optional?: boolean;
+	[key: string]: any; // any extra metadata, usually prefixed with _
+};
+
+/**
+ * Symbol that helpers can use to declare their JSON Schema contribution.
+ *
+ * Attach a function that takes the same arguments as the helper and returns
+ * a `Partial<JsonSchemaNode>` to merge into `meta.jsonSchema`.
+ *
+ * @example
+ * ```ts
+ * import { factory, JSON_SCHEMA } from 'ts-chas/guard';
+ *
+ * const min = factory((n: number) => (v: string) => v.length >= n);
+ * (min as any)[JSON_SCHEMA] = (n: number) => ({ minLength: n });
+ * ```
+ */
+export const JSON_SCHEMA = Symbol('jsonSchema');
 
 /**
  * A tagged error produced when guard validation fails.
@@ -106,6 +188,14 @@ export type GuardMeta = {
 	 * @param original - The original raw input, preserved for helpers like `.extend()`.
 	 */
 	transform?: ((v: any, original: any) => any) | undefined;
+	/**
+	 * Accumulated JSON Schema constraint metadata.
+	 *
+	 * Populated automatically when helpers with `[JSON_SCHEMA]` declarations are chained.
+	 * The `.toJsonSchema()` terminal merges this with the base type schema to produce the
+	 * final JSON Schema output.
+	 */
+	jsonSchema?: Partial<JsonSchemaNode>;
 	/** Index signature for custom metadata fields. Access with bracket notation. */
 	[key: string]: any;
 };
@@ -363,6 +453,92 @@ export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unkn
 	 * ```
 	 */
 	refine: (fn: (value: T) => T) => Guard<T, H>;
+	/**
+	 * Returns a Promise that resolves to a fast-check `Arbitrary<T>` for this guard.
+	 *
+	 * Requires `fast-check` to be installed (`npm install fast-check`).
+	 * The arbitrary reflects all constraints accumulated through the helper chain.
+	 *
+	 * @example
+	 * ```ts
+	 * import * as fc from 'fast-check';
+	 * const arb = await is.object({ name: is.string.min(1), age: is.number.int.gte(0) }).arbitrary();
+	 * fc.assert(fc.property(arb, user => myFn(user) !== null));
+	 * ```
+	 */
+	arbitrary: () => Promise<Arbitrary<T>>;
+	/**
+	 * Generates `n` valid values that satisfy this guard (default: 1 → returns a single value).
+	 *
+	 * Requires `fast-check` to be installed (`npm install fast-check`).
+	 * Generated values are guaranteed to pass the guard's predicate.
+	 *
+	 * @example
+	 * ```ts
+	 * await is.string.email.generate()          // 'x@example.com'
+	 * await is.number.int.between(1,100).generate(5)  // [7, 42, 3, 88, 15]
+	 *
+	 * // Pair with it.each for data-driven tests
+	 * const samples = await is.object({ name: is.string.min(1) }).generate(10);
+	 * it.each(samples)('processes %o', obj => expect(process(obj)).toBeTruthy());
+	 * ```
+	 */
+	generate: {
+		(): Promise<T>;
+		(n: number): Promise<T[]>;
+	};
+	/**
+	 * Serializes the guard to a JSON Schema Draft-07 compatible object.
+	 *
+	 * Captures constraints accumulated through the helper chain (min/max/email/etc.),
+	 * recursively resolves object shapes and array element types, and handles
+	 * nullable/optional variants. Best-effort: exotic guards (lazy, custom functions)
+	 * fall back to `{}`.
+	 *
+	 * @example
+	 * ```ts
+	 * is.string.email.min(5).toJsonSchema()
+	 * // { type: 'string', format: 'email', minLength: 5 }
+	 *
+	 * is.object({ name: is.string, age: is.number.int.gte(0).optional }).toJsonSchema()
+	 * // { type: 'object', properties: { name: { type: 'string' }, age: { type: 'integer', minimum: 0 } }, required: ['name'] }
+	 *
+	 * is.array(is.string.email).toJsonSchema()
+	 * // { type: 'array', items: { type: 'string', format: 'email' } }
+	 * ```
+	 */
+	toJsonSchema: () => JsonSchemaNode;
+	/**
+	 * Appends an async predicate check, switching to async mode.
+	 *
+	 * The returned `AsyncGuard<T>` has `.parseAsync()` returning a
+	 * `ResultAsync<T, GuardErr>` with the full monadic API.
+	 *
+	 * @example
+	 * ```ts
+	 * const UniqueEmail = is.string.email.whereAsync(async v => {
+	 *   return !(await db.users.exists({ email: v }));
+	 * });
+	 * UniqueEmail.parseAsync(input).match({ ok: v => v, err: e => e.message });
+	 * ```
+	 */
+	whereAsync: (fn: (value: T) => Promise<boolean>) => AsyncGuard<T>;
+	/**
+	 * Appends an async same-type transformation, switching to async mode.
+	 *
+	 * The resolved value replaces the current value and is passed to subsequent steps.
+	 */
+	refineAsync: (fn: (value: T) => Promise<T>) => AsyncGuard<T>;
+	/**
+	 * Appends an async type-changing transformation, switching to async mode.
+	 *
+	 * @example
+	 * ```ts
+	 * const Parsed = is.string.transformAsync(async raw => JSON.parse(raw) as User);
+	 * // AsyncGuard<User>
+	 * ```
+	 */
+	transformAsync: <U>(fn: (value: T) => Promise<U>) => AsyncGuard<U>;
 } & H;
 
 //
@@ -832,6 +1008,160 @@ export const arrayHelpers: ArrayHelpers<any> = {
 	),
 };
 
+// JSON Schema contributions for array helpers
+(arrayHelpers.nonEmpty as any)[JSON_SCHEMA] = () => ({ minItems: 1 });
+(arrayHelpers.empty as any)[JSON_SCHEMA] = () => ({ minItems: 0, maxItems: 0 });
+(arrayHelpers.unique as any)[JSON_SCHEMA] = () => ({ uniqueItems: true });
+(arrayHelpers.min as any)[JSON_SCHEMA] = (n: number) => ({ minItems: n });
+(arrayHelpers.max as any)[JSON_SCHEMA] = (n: number) => ({ maxItems: n });
+(arrayHelpers.size as any)[JSON_SCHEMA] = (n: number) => ({ minItems: n, maxItems: n });
+(arrayHelpers.includes as any)[JSON_SCHEMA] = (item: unknown) => ({ _arrayIncludes: item });
+(arrayHelpers.excludes as any)[JSON_SCHEMA] = (item: unknown) => ({ _arrayExcludes: item });
+
+// ---------------------------------------------------------------------------
+// JSON Schema builder
+// ---------------------------------------------------------------------------
+
+const ID_TO_JSON_TYPE: Record<string, string> = {
+	string: 'string',
+	number: 'number',
+	boolean: 'boolean',
+	bigint: 'integer',
+	null: 'null',
+	object: 'object',
+	array: 'array',
+	// Date guard uses 'Date' (capitalised) as its id
+	date: 'string',
+	Date: 'string',
+	url: 'string',
+	URL: 'string',
+	regexp: 'string',
+	RegExp: 'string',
+	symbol: 'string',
+	function: 'object',
+	literal: 'string',
+	enum: 'string',
+	union: 'object',
+	intersection: 'object',
+	discriminatedUnion: 'object',
+};
+
+/**
+ * Converts a guard's meta into a JSON Schema Draft-07 compatible node.
+ * @internal Used by the `.toJsonSchema()` terminal helper.
+ */
+function buildJsonSchema(guard: Guard<any>): JsonSchemaNode {
+	const meta = guard.meta;
+	const accumulated = meta.jsonSchema ?? {};
+
+	// --- Literal / Enum (values override type) ---
+	if (meta.values && (meta.id === 'literal' || meta.id === 'enum')) {
+		const vals = [...(meta.values as Set<unknown>)];
+		if (vals.length === 1) return { const: vals[0] };
+		return { enum: vals };
+	}
+
+	// --- Union: anyOf ---
+	if (meta.id === 'union' && Array.isArray(meta['guards'])) {
+		return { anyOf: (meta['guards'] as Guard<any>[]).map(buildJsonSchema) };
+	}
+
+	// --- Intersection: allOf ---
+	if (meta.id === 'intersection' && Array.isArray(meta['guards'])) {
+		return { allOf: (meta['guards'] as Guard<any>[]).map(buildJsonSchema) };
+	}
+
+	// --- Discriminated union: anyOf with discriminant injected ---
+	if (meta.id === 'discriminatedUnion' && meta['variantMap']) {
+		const anyOf: JsonSchemaNode[] = [];
+		const key = meta['discriminantKey'] as string;
+		for (const [disc, variantGuard] of Object.entries(meta['variantMap'] as Record<string, Guard<any>>)) {
+			const variantSchema = buildJsonSchema(variantGuard);
+			anyOf.push({
+				...variantSchema,
+				properties: {
+					...variantSchema.properties,
+					[key]: { const: disc },
+				},
+				required: [...(variantSchema.required ?? []), key].filter((v, i, a) => a.indexOf(v) === i),
+			});
+		}
+		return { anyOf };
+	}
+
+	// --- Object: recurse into shape ---
+	if (meta.id === 'object' && meta.shape) {
+		const properties: Record<string, JsonSchemaNode> = {};
+		const required: string[] = [];
+		for (const [key, fieldGuard] of Object.entries(meta.shape as Record<string, Guard<any>>)) {
+			const fieldSchema = buildJsonSchema(fieldGuard);
+			const isOptional = Boolean(fieldSchema._optional);
+			properties[key] = cleanSchema(fieldSchema);
+			if (!isOptional) required.push(key);
+		}
+		const schema: JsonSchemaNode = {
+			...accumulated,
+			type: 'object',
+		};
+		if (Object.keys(properties).length > 0) schema.properties = properties;
+		if (required.length > 0) schema.required = required;
+		return cleanSchema(schema);
+	}
+
+	// --- Tuple: fixed-position items + optional rest (JSON Schema Draft-07) ---
+	if (meta.id === 'tuple') {
+		const tupleGuards = meta['tupleGuards'] as Guard<any>[] | undefined;
+		const restGuard = meta['restGuard'] as Guard<any> | undefined;
+		const schema: JsonSchemaNode = { ...accumulated, type: 'array' };
+		if (tupleGuards?.length) {
+			(schema as any).prefixItems = tupleGuards.map(buildJsonSchema);
+			schema.items = restGuard ? buildJsonSchema(restGuard) : (false as any);
+		}
+		return cleanSchema(schema);
+	}
+
+	// --- Array: recurse into element guard ---
+	if (meta.id === 'array') {
+		const elementGuards = meta['elementGuards'] as Guard<any>[] | undefined;
+		const schema: JsonSchemaNode = { ...accumulated, type: 'array' };
+		if (elementGuards?.length === 1) {
+			schema.items = buildJsonSchema(elementGuards[0]!);
+		} else if (elementGuards && elementGuards.length > 1) {
+			schema.items = { anyOf: elementGuards.map(buildJsonSchema) };
+		}
+		return cleanSchema(schema);
+	}
+
+	// --- Base type + accumulated constraints ---
+	const jsonType = ID_TO_JSON_TYPE[meta.id] ?? undefined;
+	const schema: JsonSchemaNode = { ...accumulated };
+	if (jsonType && !accumulated.type) {
+		schema.type = jsonType;
+	}
+
+	// Special: dates use string + date-time format (id is 'Date' in the built-in guard)
+	if ((meta.id === 'date' || meta.id === 'Date') && !accumulated.format) {
+		schema.format = 'date-time';
+	}
+
+	// _nullable and _optional are left intact for callers (object builder / cleanSchema).
+	return schema;
+}
+
+/**
+ * Applies `_nullable` → type widening and strips all internal `_` flags.
+ * Call this on the final output of `buildJsonSchema` before returning to the user.
+ */
+function cleanSchema(schema: JsonSchemaNode): JsonSchemaNode {
+	const out = { ...schema };
+	if (out._nullable) {
+		out.type = out.type ? [...(Array.isArray(out.type) ? out.type : [out.type]), 'null'] : ['null'];
+	}
+	delete out._nullable;
+	delete out._optional;
+	return out;
+}
+
 // Shared by all guards
 const universalHelpers: Record<string, any> = {
 	error: transformer((target, msg: string | ((ctx: { meta: GuardMeta; value: unknown }) => string)) => {
@@ -941,7 +1271,10 @@ const universalHelpers: Record<string, any> = {
 	nullable: property(
 		transformer((target: Guard<any, Record<string, any>>) => ({
 			fn: (v: unknown): v is any => v === null || target(v),
-			meta: { name: `${target.meta.name}.nullable` },
+			meta: {
+				name: `${target.meta.name}.nullable`,
+				jsonSchema: { ...target.meta.jsonSchema, _nullable: true },
+			},
 			helpers: {},
 			replaceHelpers: true,
 		}))
@@ -950,7 +1283,10 @@ const universalHelpers: Record<string, any> = {
 	optional: property(
 		transformer((target: Guard<any, Record<string, any>>) => ({
 			fn: (v: unknown): v is any => v === undefined || target(v),
-			meta: { name: `${target.meta.name}.optional` },
+			meta: {
+				name: `${target.meta.name}.optional`,
+				jsonSchema: { ...target.meta.jsonSchema, _optional: true },
+			},
 			helpers: {},
 			replaceHelpers: true,
 		}))
@@ -959,7 +1295,10 @@ const universalHelpers: Record<string, any> = {
 	nullish: property(
 		transformer((target: Guard<any, Record<string, any>>) => ({
 			fn: (v: unknown): v is any => v == null || target(v),
-			meta: { name: `${target.meta.name}.nullish` },
+			meta: {
+				name: `${target.meta.name}.nullish`,
+				jsonSchema: { ...target.meta.jsonSchema, _nullable: true, _optional: true },
+			},
 			helpers: {},
 			replaceHelpers: true,
 		}))
@@ -1021,9 +1360,29 @@ const universalHelpers: Record<string, any> = {
 			};
 		})
 	),
+
+	toJsonSchema: terminal(
+		(target: Guard<any, Record<string, any>>): JsonSchemaNode => cleanSchema(buildJsonSchema(target))
+	),
+
+	arbitrary: terminal((target: Guard<any, Record<string, any>>) => arbitraryTerminal(target)),
+
+	generate: terminal((target: Guard<any, Record<string, any>>, n?: number) => generateTerminal(target, n)),
+
+	whereAsync: terminal((target: Guard<any>, fn: (v: any) => Promise<boolean>) =>
+		new AsyncGuard(target, []).whereAsync(fn)
+	),
+
+	refineAsync: terminal((target: Guard<any>, fn: (v: any) => Promise<any>) =>
+		new AsyncGuard(target, []).refineAsync(fn)
+	),
+
+	transformAsync: terminal((target: Guard<any>, fn: (v: any) => Promise<any>) =>
+		new AsyncGuard(target, []).transformAsync(fn)
+	),
 };
 
-function getType(v: any): string {
+export function getType(v: any): string {
 	if (v === null) return 'null';
 	if (Array.isArray(v)) return 'array';
 	if (v instanceof Date) return 'date';
@@ -1054,7 +1413,7 @@ function getType(v: any): string {
  * The guard chain name is always available on the error's `.name` field
  * for programmatic inspection — no need to duplicate it in the message.
  */
-function buildGuardErrMsg(meta: GuardMeta, v: unknown): string {
+export function buildGuardErrMsg(meta: GuardMeta, v: unknown): string {
 	const actual = getType(v);
 	const isRefinementFailure =
 		actual === meta.id ||
@@ -1220,6 +1579,9 @@ export function createProxy<T, H extends Record<string, any>>(
 			if (helper[FACTORY]) {
 				return (...args: any[]) => {
 					const predicate = helper(...args);
+					const jsonContrib: Partial<JsonSchemaNode> | undefined = (helper as any)[JSON_SCHEMA]
+						? (helper as any)[JSON_SCHEMA](...args)
+						: undefined;
 					const next = Object.assign(
 						(v: unknown): v is T => {
 							if (!target(v)) return false;
@@ -1230,6 +1592,9 @@ export function createProxy<T, H extends Record<string, any>>(
 							meta: {
 								...target.meta,
 								name: `${target.meta.name}.${String(prop)}(${args.map(a => safeStringify(a)).join(', ')})`,
+								...(jsonContrib && {
+									jsonSchema: { ...target.meta.jsonSchema, ...jsonContrib },
+								}),
 							},
 						}
 					);
@@ -1238,6 +1603,9 @@ export function createProxy<T, H extends Record<string, any>>(
 			}
 
 			// 4. Value helpers — simple predicates, compose immediately
+			const jsonContrib: Partial<JsonSchemaNode> | undefined = (helper as any)[JSON_SCHEMA]
+				? (helper as any)[JSON_SCHEMA]()
+				: undefined;
 			const next = Object.assign(
 				(v: unknown): v is T => {
 					if (!target(v)) return false;
@@ -1245,7 +1613,13 @@ export function createProxy<T, H extends Record<string, any>>(
 					return helper(transformed);
 				},
 				{
-					meta: { ...target.meta, name: `${target.meta.name}.${String(prop)}` },
+					meta: {
+						...target.meta,
+						name: `${target.meta.name}.${String(prop)}`,
+						...(jsonContrib && {
+							jsonSchema: { ...target.meta.jsonSchema, ...jsonContrib },
+						}),
+					},
 				}
 			);
 			return createProxy(next, helpers);

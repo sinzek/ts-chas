@@ -1,4 +1,4 @@
-import { factory, makeGuard, property, transformer, type Guard } from '../shared.js';
+import { factory, makeGuard, property, transformer, type Guard, JSON_SCHEMA } from '../shared.js';
 
 export interface UrlHelpers {
 	/** Restricts to http:// and https:// URLs with valid domain hostnames */
@@ -50,7 +50,7 @@ const urlHelpers: UrlHelpers = {
 		transformer<string, string, [], UrlHelpers>(target => ({
 			fn: (v: unknown): v is string =>
 				typeof v === 'string' && target(v) && isValidUrl(v, { protocol: /^https?$/, hostname: DOMAIN_RE }),
-			meta: { name: `${target.meta.name}.http` },
+			meta: { name: `${target.meta.name}.http`, jsonSchema: { ...(target.meta.jsonSchema ?? {}), _urlProtocol: 'http' } },
 		}))
 	) as any,
 
@@ -58,7 +58,7 @@ const urlHelpers: UrlHelpers = {
 		transformer<string, string, [], UrlHelpers>(target => ({
 			fn: (v: unknown): v is string =>
 				typeof v === 'string' && target(v) && isValidUrl(v, { protocol: /^https$/, hostname: DOMAIN_RE }),
-			meta: { name: `${target.meta.name}.https` },
+			meta: { name: `${target.meta.name}.https`, jsonSchema: { ...(target.meta.jsonSchema ?? {}), _urlProtocol: 'https' } },
 		}))
 	) as any,
 
@@ -66,7 +66,7 @@ const urlHelpers: UrlHelpers = {
 		transformer<string, string, [], UrlHelpers>(target => ({
 			fn: (v: unknown): v is string =>
 				typeof v === 'string' && target(v) && isValidUrl(v, { protocol: /^https$/, hostname: DOMAIN_RE }),
-			meta: { name: `${target.meta.name}.secure` },
+			meta: { name: `${target.meta.name}.secure`, jsonSchema: { ...(target.meta.jsonSchema ?? {}), _urlProtocol: 'https' } },
 		}))
 	) as any,
 
@@ -77,7 +77,7 @@ const urlHelpers: UrlHelpers = {
 				const url = tryParseUrl(v);
 				return url !== null && LOCAL_HOSTS.has(url.hostname);
 			},
-			meta: { name: `${target.meta.name}.local` },
+			meta: { name: `${target.meta.name}.local`, jsonSchema: { ...(target.meta.jsonSchema ?? {}), _urlLocal: true } },
 		}))
 	) as any,
 
@@ -88,7 +88,7 @@ const urlHelpers: UrlHelpers = {
 				const url = tryParseUrl(v);
 				return url !== null && url.search.length > 0;
 			},
-			meta: { name: `${target.meta.name}.hasSearch` },
+			meta: { name: `${target.meta.name}.hasSearch`, jsonSchema: { ...(target.meta.jsonSchema ?? {}), _urlHasSearch: true } },
 		}))
 	) as any,
 
@@ -99,7 +99,7 @@ const urlHelpers: UrlHelpers = {
 				const url = tryParseUrl(v);
 				return url !== null && url.hash.length > 0;
 			},
-			meta: { name: `${target.meta.name}.hasHash` },
+			meta: { name: `${target.meta.name}.hasHash`, jsonSchema: { ...(target.meta.jsonSchema ?? {}), _urlHasHash: true } },
 		}))
 	) as any,
 
@@ -127,6 +127,9 @@ const urlHelpers: UrlHelpers = {
 		return url.port.length > 0;
 	}),
 };
+
+// JSON Schema contributions for factory helpers (property-transformer helpers embed directly in meta above).
+(urlHelpers.port as any)[JSON_SCHEMA] = (n?: number) => (n !== undefined ? { _urlPort: n } : { _urlHasPort: true });
 
 export type UrlGuard = Guard<string, UrlHelpers>;
 

@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { makeGuard, factory, transformer, property, type Guard, type InferGuard } from '../shared.js';
+import { makeGuard, factory, transformer, property, type Guard, type InferGuard, JSON_SCHEMA } from '../shared.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,7 +56,7 @@ export interface MapGuardFactory {
 	/** Creates an unnarrowed Map guard (any key/value types). */
 	(): MapGuard<unknown, unknown>;
 	/** Creates a Map guard with typed keys and values. */
-	<KG extends Guard<any, any>, VG extends Guard<any, any>>(
+	<KG extends Guard<any>, VG extends Guard<any>>(
 		keyGuard: KG,
 		valueGuard: VG
 	): MapGuard<InferGuard<KG>, InferGuard<VG>>;
@@ -81,6 +80,15 @@ export const MapGuardFactory: MapGuardFactory = (
 			name:
 				keyGuard || valueGuard ? `map<${keyGuard?.meta.name ?? '?'}, ${valueGuard?.meta.name ?? '?'}>` : 'map',
 			id: 'map',
+			...(keyGuard && { keyGuard }),
+			...(valueGuard && { valueGuard }),
 		},
 		mapHelpers as any
 	);
+
+// JSON Schema contributions — size constraints reuse minItems/maxItems (same semantics as arrays).
+(mapHelpers.nonEmpty as any)[JSON_SCHEMA] = () => ({ minItems: 1 });
+(mapHelpers.empty as any)[JSON_SCHEMA] = () => ({ minItems: 0, maxItems: 0 });
+(mapHelpers.size as any)[JSON_SCHEMA] = (n: number) => ({ minItems: n, maxItems: n });
+(mapHelpers.minSize as any)[JSON_SCHEMA] = (n: number) => ({ minItems: n });
+(mapHelpers.maxSize as any)[JSON_SCHEMA] = (n: number) => ({ maxItems: n });

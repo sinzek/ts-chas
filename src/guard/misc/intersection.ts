@@ -1,13 +1,13 @@
 import { makeGuard, type Guard, type InferGuard } from '../shared.js';
 import { type UnionToIntersection } from '../../utils.js';
 
-export type IntersectionGuard<T extends Guard<any, any>[]> = Guard<
+export type IntersectionGuard<T extends Guard<any>[]> = Guard<
 	UnionToIntersection<InferGuard<T[number]>>,
 	typeof intersectionHelpers
 >;
 
 export interface IntersectionGuardFactory {
-	<T extends Guard<any, any>[]>(...guards: T): IntersectionGuard<T>;
+	<T extends Guard<any>[]>(...guards: T): IntersectionGuard<T>;
 }
 
 const intersectionHelpers = {};
@@ -25,6 +25,7 @@ export const IntersectionGuardFactory: IntersectionGuardFactory = (...guards) =>
 		{
 			name: `intersection<${guards.map(g => g.meta?.name ?? '?').join(' & ')}>`,
 			id: 'intersection',
+			guards,
 		},
 		intersectionHelpers
 	);

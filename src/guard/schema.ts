@@ -275,15 +275,9 @@ function buildErrMsg(meta: GuardMeta, v: unknown): string {
  * Returns the (possibly defaulted or transformed) value if no errors occurred
  * at this node, or the original value if errors occurred (unless caught).
  */
-function validateDeep(
-	value: unknown,
-	guard: Guard<any, any>,
-	schemaName: string,
-	path: string[],
-	errors: GuardErr[]
-): any {
+function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, path: string[], errors: GuardErr[]): any {
 	const meta = guard.meta;
-	const shape = meta.shape as Record<string, Guard<any, any>> | undefined;
+	const shape = meta.shape as Record<string, Guard<any>> | undefined;
 
 	// Helper to handle failure and apply defaults
 	const handleFailure = (currentValue: unknown, expectedType: string, customMsg?: string) => {
@@ -346,7 +340,7 @@ function validateDeep(
 
 	// ---- Array: recurse into elements if they have guards ----
 	if (meta.id === 'array' && Array.isArray(value)) {
-		const elementGuards: Guard<any, any>[] | undefined = meta['elementGuards'];
+		const elementGuards: Guard<any>[] | undefined = meta['elementGuards'];
 
 		if (elementGuards && elementGuards.length > 0) {
 			const result: any[] = [...value];
@@ -390,8 +384,8 @@ function validateDeep(
 
 	// ---- Tuple: recurse into positional elements ----
 	if (meta.id === 'tuple' && Array.isArray(value)) {
-		const tupleGuards: Guard<any, any>[] | undefined = meta['tupleGuards'];
-		const restGuard: Guard<any, any> | undefined = meta['restGuard'];
+		const tupleGuards: Guard<any>[] | undefined = meta['tupleGuards'];
+		const restGuard: Guard<any> | undefined = meta['restGuard'];
 
 		if (tupleGuards) {
 			if (restGuard ? value.length < tupleGuards.length : value.length !== tupleGuards.length) {
@@ -453,8 +447,8 @@ function validateDeep(
  * Input to `defineSchemas`: either a Guard directly, or a plain record of guards
  * (which will be wrapped in an implicit object schema).
  */
-type SchemaInputValue = Guard<any, any> | { [key: string]: SchemaInputValue };
-type SchemaInput = Guard<any, any> | Record<string, SchemaInputValue>;
+type SchemaInputValue = Guard<any> | { [key: string]: SchemaInputValue };
+type SchemaInput = Guard<any> | Record<string, SchemaInputValue>;
 
 /**
  * Resolves a `SchemaInput` (or nested value) to its inferred TypeScript type.
@@ -548,7 +542,7 @@ export function defineSchema<T extends SchemaInput>(name: string, input: T): Sch
 /**
  * Checks if a value is a Guard (function with `.meta`).
  */
-function isGuard(v: unknown): v is Guard<any, any> {
+function isGuard(v: unknown): v is Guard<any> {
 	return typeof v === 'function' && 'meta' in v;
 }
 
@@ -556,13 +550,13 @@ function isGuard(v: unknown): v is Guard<any, any> {
  * If the input is already a Guard, return it.
  * If it's a plain record, recursively resolve nested records into object guards.
  */
-function resolveGuard(input: SchemaInput | SchemaInputValue): Guard<any, any> {
+function resolveGuard(input: SchemaInput | SchemaInputValue): Guard<any> {
 	if (isGuard(input)) {
 		return input;
 	}
 	// Plain record — recursively resolve each value, then build an object guard
 	const record = input as Record<string, SchemaInputValue>;
-	const shape: Record<string, Guard<any, any>> = {};
+	const shape: Record<string, Guard<any>> = {};
 	for (const [key, value] of Object.entries(record)) {
 		shape[key] = resolveGuard(value);
 	}
@@ -593,7 +587,7 @@ function resolveGuard(input: SchemaInput | SchemaInputValue): Guard<any, any> {
 		}
 	);
 
-	return fn as unknown as Guard<any, any>;
+	return fn as unknown as Guard<any>;
 }
 
 /**

@@ -19,6 +19,8 @@ import { TupleGuardFactory } from './objects/tuple.js';
 import { LiteralGuardFactory } from './misc/literal.js';
 import { UnionGuardFactory } from './misc/union.js';
 import { IntersectionGuardFactory } from './misc/intersection.js';
+import { LazyGuardFactory } from './misc/lazy.js';
+import { DiscriminatedUnionGuardFactory } from './misc/discriminated-union.js';
 import { EnumGuardFactory } from './misc/enum.js';
 import { ResultGuardFactory } from './custom/result.js';
 import { OptionGuardFactory } from './custom/option.js';
@@ -60,6 +62,12 @@ export type { TemplateLiteralGuardFactory, TemplateLiteralGuard } from './misc/t
 export type { XorGuardFactory, XorGuard } from './misc/xor.js';
 export type { IntersectionGuardFactory, IntersectionGuard } from './misc/intersection.js';
 export type { UnionGuardFactory, UnionGuard } from './misc/union.js';
+export type {
+	DiscriminatedUnionGuardFactory,
+	DiscriminatedUnionGuard,
+	DiscriminatedUnionType,
+} from './misc/discriminated-union.js';
+export type { LazyGuardFactory, LazyGuard } from './misc/lazy.js';
 export type { LiteralGuardFactory, LiteralGuard } from './misc/literal.js';
 export type { TupleGuardFactory, TupleGuard, TupleHelpers } from './objects/tuple.js';
 export type { RecordGuardFactory, RecordGuard } from './objects/record.js';
@@ -86,10 +94,21 @@ export type { InstanceofGuardFactory, InstanceofGuard } from './objects/instance
 export type { CustomGuardFactory, CustomGuard } from './custom/custom.js';
 
 // guard authoring utilities for custom guard creation
-export { makeGuard, factory, transformer, terminal, property, type TransformerResult } from './shared.js';
+export {
+	makeGuard,
+	factory,
+	transformer,
+	terminal,
+	property,
+	JSON_SCHEMA,
+	type TransformerResult,
+	type JsonSchemaNode,
+	type Arbitrary,
+} from './shared.js';
 
 // misc types
 export type { Json } from './misc/json.js';
+export { AsyncGuard } from './async.js';
 
 const baseIs = {
 	// ---- PRIMITIVES ----
@@ -418,6 +437,47 @@ const baseIs = {
 	 * is.union(is.object({ a: is.string }), is.object({ b: is.number }))(value); // value is inferred as { a: string } | { b: number }
 	 */
 	union: UnionGuardFactory,
+	/**
+	 * Creates a Guard for a discriminated union — a union of object types that share a
+	 * common literal key used to distinguish variants.
+	 *
+	 * Unlike `is.union()` which tries every variant (O(n)), `is.discriminatedUnion()`
+	 * reads the discriminant key and jumps directly to the matching variant in O(1).
+	 *
+	 * @param key - The name of the discriminant property present on all variants.
+	 * @param variants - A record mapping each discriminant value to its object guard.
+	 *
+	 * @example
+	 * const ShapeGuard = is.discriminatedUnion('kind', {
+	 *   circle: is.object({ radius: is.number }),
+	 *   square: is.object({ side: is.number }),
+	 * });
+	 *
+	 * ShapeGuard({ kind: 'circle', radius: 5 });    // true
+	 * ShapeGuard({ kind: 'triangle', base: 3 });    // false — unknown variant
+	 * ShapeGuard({ radius: 5 });                    // false — missing discriminant
+	 *
+	 * type Shape = InferGuard<typeof ShapeGuard>;
+	 * // { kind: 'circle'; radius: number } | { kind: 'square'; side: number }
+	 */
+	discriminatedUnion: DiscriminatedUnionGuardFactory,
+	/**
+	 * Creates a lazily-evaluated guard by deferring resolution until the first call.
+	 *
+	 * This is the only way to create guards for recursive or mutually-recursive types.
+	 * The thunk is called at most once and the result is cached.
+	 *
+	 * @example
+	 * type Node = { value: number; children: Node[] };
+	 *
+	 * const NodeGuard: Guard<Node> = is.object({
+	 *   value: is.number,
+	 *   children: is.lazy(() => is.array(NodeGuard)),
+	 * });
+	 *
+	 * NodeGuard({ value: 1, children: [{ value: 2, children: [] }] }); // true
+	 */
+	lazy: LazyGuardFactory,
 	/**
 	 * Creates a Guard that validates that a value satisfies all of the provided guards, basically a variant of .and() but for multiple guards at once.
 	 *

@@ -1,5 +1,5 @@
 import type { Brand } from '../shared.js';
-import { makeGuard, type Guard, factory } from '../shared.js';
+import { makeGuard, type Guard, factory, JSON_SCHEMA } from '../shared.js';
 
 export interface NumberHelpers {
 	/** Validates that the number is greater than the minimum. */
@@ -64,6 +64,26 @@ const numberHelpers: NumberHelpers = {
 	),
 	unit: ((v: number) => v >= 0 && v <= 1) as any,
 };
+
+// JSON Schema contributions — picked up by the proxy when these helpers are applied.
+(numberHelpers.gt as any)[JSON_SCHEMA] = (n: number) => ({ exclusiveMinimum: n });
+(numberHelpers.gte as any)[JSON_SCHEMA] = (n: number) => ({ minimum: n });
+(numberHelpers.lt as any)[JSON_SCHEMA] = (n: number) => ({ exclusiveMaximum: n });
+(numberHelpers.lte as any)[JSON_SCHEMA] = (n: number) => ({ maximum: n });
+(numberHelpers.between as any)[JSON_SCHEMA] = (min: number, max: number) => ({ minimum: min, maximum: max });
+(numberHelpers.int as any)[JSON_SCHEMA] = () => ({ type: 'integer' });
+(numberHelpers.int32 as any)[JSON_SCHEMA] = () => ({ type: 'integer', minimum: -2147483648, maximum: 2147483647 });
+(numberHelpers.positive as any)[JSON_SCHEMA] = () => ({ exclusiveMinimum: 0 });
+(numberHelpers.nonnegative as any)[JSON_SCHEMA] = () => ({ minimum: 0 });
+(numberHelpers.negative as any)[JSON_SCHEMA] = () => ({ exclusiveMaximum: 0 });
+(numberHelpers.nonpositive as any)[JSON_SCHEMA] = () => ({ maximum: 0 });
+(numberHelpers.multipleOf as any)[JSON_SCHEMA] = (n: number) => ({ multipleOf: n });
+(numberHelpers.port as any)[JSON_SCHEMA] = () => ({ type: 'integer', minimum: 0, maximum: 65535 });
+(numberHelpers.unit as any)[JSON_SCHEMA] = () => ({ minimum: 0, maximum: 1 });
+(numberHelpers.even as any)[JSON_SCHEMA] = () => ({ multipleOf: 2 });
+(numberHelpers.odd as any)[JSON_SCHEMA] = () => ({ _oddNumber: true });
+(numberHelpers.digits as any)[JSON_SCHEMA] = (n: number) => ({ _digits: n });
+(numberHelpers.precision as any)[JSON_SCHEMA] = (n: number) => ({ _precision: n });
 
 export const NumberGuard: NumberGuard = makeGuard(
 	(v: unknown): v is number => typeof v === 'number' && !Number.isNaN(v) && Number.isFinite(v),

@@ -1,4 +1,4 @@
-import { makeGuard, factory, type Guard, type InferGuard, property, transformer } from '../shared.js';
+import { makeGuard, factory, type Guard, type InferGuard, property, transformer, JSON_SCHEMA } from '../shared.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,10 +76,10 @@ export interface SetGuardFactory {
 	/** Creates an unnarrowed Set guard (any value type). */
 	(): SetGuard<unknown>;
 	/** Creates a Set guard with typed values. */
-	<G extends Guard<any, any>>(valueGuard: G): SetGuard<InferGuard<G>>;
+	<G extends Guard<any>>(valueGuard: G): SetGuard<InferGuard<G>>;
 }
 
-export const SetGuardFactory: SetGuardFactory = (valueGuard?: Guard<any, Record<string, any>>) =>
+export const SetGuardFactory: SetGuardFactory = (valueGuard?: Guard<any>) =>
 	makeGuard(
 		(v: unknown): v is Set<any> => {
 			if (!(v instanceof Set)) return false;
@@ -92,6 +92,14 @@ export const SetGuardFactory: SetGuardFactory = (valueGuard?: Guard<any, Record<
 		{
 			name: valueGuard ? `set<${valueGuard.meta.name}>` : 'set',
 			id: 'set',
+			...(valueGuard && { elementGuard: valueGuard }),
 		},
 		setHelpers as any
 	);
+
+// JSON Schema contributions — size constraints reuse minItems/maxItems.
+(setHelpers.nonEmpty as any)[JSON_SCHEMA] = () => ({ minItems: 1 });
+(setHelpers.empty as any)[JSON_SCHEMA] = () => ({ minItems: 0, maxItems: 0 });
+(setHelpers.size as any)[JSON_SCHEMA] = (n: number) => ({ minItems: n, maxItems: n });
+(setHelpers.minSize as any)[JSON_SCHEMA] = (n: number) => ({ minItems: n });
+(setHelpers.maxSize as any)[JSON_SCHEMA] = (n: number) => ({ maxItems: n });

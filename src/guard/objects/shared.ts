@@ -1,5 +1,5 @@
 import type { Prettify } from '../../utils.js';
-import { factory, transformer, type Guard, type InferGuard, property } from '../shared.js';
+import { factory, transformer, type Guard, type InferGuard, property, JSON_SCHEMA } from '../shared.js';
 import { type EnumHelpers, EnumGuardFactory } from '../misc/enum.js';
 
 export type ObjectHelpers<T> = {
@@ -91,7 +91,7 @@ export type ObjectHelpers<T> = {
 		<K extends string>(
 			key: K
 		): Guard<Prettify<T & { [P in K]: unknown }>, ObjectHelpers<T & { [P in K]: unknown }>>;
-		<K extends string, G extends Guard<any, any>>(
+		<K extends string, G extends Guard<any>>(
 			key: K,
 			guard: G
 		): Guard<Prettify<T & { [P in K]: InferGuard<G> }>, ObjectHelpers<T & { [P in K]: InferGuard<G> }>>;
@@ -278,7 +278,13 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 				const schemaKeys = Object.keys(schema);
 				return keys.every(k => schemaKeys.includes(k));
 			};
-			return { fn: nextFn, meta: { name: `${target.meta.name}.strict` } };
+			return {
+				fn: nextFn,
+				meta: {
+					name: `${target.meta.name}.strict`,
+					jsonSchema: { ...(target.meta.jsonSchema ?? {}), additionalProperties: false },
+				},
+			};
 		})
 	) as any,
 	catchall: transformer<any, any, [Guard<any>], ObjectHelpers<any>>((target, catchall: Guard<any>) => {
@@ -348,3 +354,10 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 			typeof v === 'object' && v !== null && Object.keys(v).every(key => keys.includes(key))
 	),
 };
+
+// JSON Schema contributions for object helpers
+(objectHelpers.size as any)[JSON_SCHEMA] = (n: number) => ({ minProperties: n, maxProperties: n });
+(objectHelpers.minSize as any)[JSON_SCHEMA] = (n: number) => ({ minProperties: n });
+(objectHelpers.maxSize as any)[JSON_SCHEMA] = (n: number) => ({ maxProperties: n });
+(objectHelpers.hasAll as any)[JSON_SCHEMA] = (keys: string[]) => ({ _hasAllKeys: keys });
+(objectHelpers.hasOnly as any)[JSON_SCHEMA] = (keys: string[]) => ({ _hasOnlyKeys: keys });

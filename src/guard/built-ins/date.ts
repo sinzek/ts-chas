@@ -1,4 +1,4 @@
-import { makeGuard, type Guard, factory, transformer } from '../shared.js';
+import { makeGuard, type Guard, factory, transformer, JSON_SCHEMA } from '../shared.js';
 
 export interface DateHelpers {
 	/** Validates that the date is before the specified date. */
@@ -167,3 +167,58 @@ export const DateGuard: DateGuard = makeGuard(
 	},
 	dateHelpers
 );
+
+// JSON Schema contributions — picked up by the proxy when helpers are applied.
+// Bounds-based: these translate directly to minimum/maximum timestamps.
+(dateHelpers.after as any)[JSON_SCHEMA] = (date: Date) => ({ minimum: date.getTime() + 1 });
+(dateHelpers.before as any)[JSON_SCHEMA] = (date: Date) => ({ maximum: date.getTime() - 1 });
+(dateHelpers.between as any)[JSON_SCHEMA] = (min: Date, max: Date) => ({
+	minimum: min.getTime(),
+	maximum: max.getTime(),
+});
+(dateHelpers.future as any)[JSON_SCHEMA] = () => ({ minimum: Date.now() + 1 });
+(dateHelpers.past as any)[JSON_SCHEMA] = () => ({ maximum: Date.now() - 1 });
+(dateHelpers.year as any)[JSON_SCHEMA] = (year: number) => ({
+	minimum: new Date(year, 0, 1, 0, 0, 0, 0).getTime(),
+	maximum: new Date(year, 11, 31, 23, 59, 59, 999).getTime(),
+});
+(dateHelpers.sameYearAs as any)[JSON_SCHEMA] = (date: Date) => {
+	const y = date.getFullYear();
+	return { minimum: new Date(y, 0, 1).getTime(), maximum: new Date(y, 11, 31, 23, 59, 59, 999).getTime() };
+};
+(dateHelpers.sameMonthAs as any)[JSON_SCHEMA] = (date: Date) => {
+	const y = date.getFullYear();
+	const m = date.getMonth();
+	return { minimum: new Date(y, m, 1).getTime(), maximum: new Date(y, m + 1, 0, 23, 59, 59, 999).getTime() };
+};
+(dateHelpers.sameDayAs as any)[JSON_SCHEMA] = (date: Date) => {
+	const start = new Date(date); start.setHours(0, 0, 0, 0);
+	const end = new Date(date); end.setHours(23, 59, 59, 999);
+	return { minimum: start.getTime(), maximum: end.getTime() };
+};
+(dateHelpers.today as any)[JSON_SCHEMA] = () => {
+	const start = new Date(); start.setHours(0, 0, 0, 0);
+	const end = new Date(); end.setHours(23, 59, 59, 999);
+	return { minimum: start.getTime(), maximum: end.getTime() };
+};
+(dateHelpers.tomorrow as any)[JSON_SCHEMA] = () => {
+	const start = new Date(); start.setDate(start.getDate() + 1); start.setHours(0, 0, 0, 0);
+	const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23, 59, 59, 999);
+	return { minimum: start.getTime(), maximum: end.getTime() };
+};
+(dateHelpers.yesterday as any)[JSON_SCHEMA] = () => {
+	const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0);
+	const end = new Date(); end.setDate(end.getDate() - 1); end.setHours(23, 59, 59, 999);
+	return { minimum: start.getTime(), maximum: end.getTime() };
+};
+
+// Filter-based: these use custom markers and are applied as post-generation filters.
+(dateHelpers.weekend as any)[JSON_SCHEMA] = () => ({ _dateFilter: 'weekend' });
+(dateHelpers.weekday as any)[JSON_SCHEMA] = () => ({ _dateFilter: 'weekday' });
+(dateHelpers.day as any)[JSON_SCHEMA] = (day: keyof typeof DAY_MAP) => ({ _dateDay: DAY_MAP[day] });
+(dateHelpers.month as any)[JSON_SCHEMA] = (month: number) => ({ _dateMonth: month });
+(dateHelpers.dayOfMonth as any)[JSON_SCHEMA] = (day: number) => ({ _dateDayOfMonth: day });
+(dateHelpers.hour as any)[JSON_SCHEMA] = (hour: number) => ({ _dateHour: hour });
+(dateHelpers.minute as any)[JSON_SCHEMA] = (minute: number) => ({ _dateMinute: minute });
+(dateHelpers.second as any)[JSON_SCHEMA] = (second: number) => ({ _dateSecond: second });
+(dateHelpers.millisecond as any)[JSON_SCHEMA] = (ms: number) => ({ _dateMs: ms });

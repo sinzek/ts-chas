@@ -1,4 +1,4 @@
-import { makeGuard, type Guard, factory } from '../shared.js';
+import { makeGuard, type Guard, factory, JSON_SCHEMA } from '../shared.js';
 
 export interface BigIntHelpers {
 	/** Validates that the bigint is greater than the minimum. */
@@ -61,3 +61,21 @@ export const BigIntGuard: BigIntGuard = makeGuard(
 	},
 	bigintHelpers
 );
+
+// JSON Schema contributions — bigint has no native JSON Schema type, so we use
+// custom _bigint* markers (string-serialized to remain JSON-safe) for the generator.
+(bigintHelpers.gt as any)[JSON_SCHEMA] = (min: bigint) => ({ _bigintExclusiveMin: String(min) });
+(bigintHelpers.gte as any)[JSON_SCHEMA] = (min: bigint) => ({ _bigintMin: String(min) });
+(bigintHelpers.lt as any)[JSON_SCHEMA] = (max: bigint) => ({ _bigintExclusiveMax: String(max) });
+(bigintHelpers.lte as any)[JSON_SCHEMA] = (max: bigint) => ({ _bigintMax: String(max) });
+(bigintHelpers.positive as any)[JSON_SCHEMA] = () => ({ _bigintExclusiveMin: '0' });
+(bigintHelpers.nonnegative as any)[JSON_SCHEMA] = () => ({ _bigintMin: '0' });
+(bigintHelpers.negative as any)[JSON_SCHEMA] = () => ({ _bigintExclusiveMax: '0' });
+(bigintHelpers.nonpositive as any)[JSON_SCHEMA] = () => ({ _bigintMax: '0' });
+(bigintHelpers.between as any)[JSON_SCHEMA] = (min: bigint, max: bigint) => ({ _bigintMin: String(min), _bigintMax: String(max) });
+(bigintHelpers.even as any)[JSON_SCHEMA] = () => ({ _bigintEven: true });
+(bigintHelpers.odd as any)[JSON_SCHEMA] = () => ({ _bigintOdd: true });
+(bigintHelpers.multipleOf as any)[JSON_SCHEMA] = (n: bigint) => ({ _bigintMultipleOf: String(n) });
+(bigintHelpers.digits as any)[JSON_SCHEMA] = (n: number) => ({ _bigintDigits: n });
+(bigintHelpers.int32 as any)[JSON_SCHEMA] = () => ({ _bigintMin: '-2147483648', _bigintMax: '2147483647' });
+(bigintHelpers.int64 as any)[JSON_SCHEMA] = () => ({ _bigintMin: '-9223372036854775808', _bigintMax: '9223372036854775807' });

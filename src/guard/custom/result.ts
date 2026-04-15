@@ -51,7 +51,7 @@ export interface ResultHelpers<T = unknown, E = unknown> {
 	 */
 	ok: {
 		(): Guard<Ok<T> & Result<T, never>>;
-		<G extends Guard<any, any>>(innerGuard: G): Guard<Ok<InferGuard<G>> & Result<InferGuard<G>, never>>;
+		<G extends Guard<any>>(innerGuard: G): Guard<Ok<InferGuard<G>> & Result<InferGuard<G>, never>>;
 	};
 
 	/**
@@ -68,7 +68,7 @@ export interface ResultHelpers<T = unknown, E = unknown> {
 	 */
 	err: {
 		(): Guard<Err<E> & Result<never, E>>;
-		<G extends Guard<any, any>>(innerGuard: G): Guard<Err<InferGuard<G>> & Result<never, InferGuard<G>>>;
+		<G extends Guard<any>>(innerGuard: G): Guard<Err<InferGuard<G>> & Result<never, InferGuard<G>>>;
 	};
 }
 
@@ -96,7 +96,7 @@ export interface ResultGuardFactory {
 	/** Creates an unnarrowed Result guard. */
 	(): ResultGuard<unknown, unknown>;
 	/** Creates a Result guard narrowed by Ok value and Err error types. */
-	<OkG extends Guard<any, any>, ErrG extends Guard<any, any>>(
+	<OkG extends Guard<any>, ErrG extends Guard<any>>(
 		okGuard: OkG,
 		errGuard: ErrG
 	): ResultGuard<InferGuard<OkG>, InferGuard<ErrG>>;

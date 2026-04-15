@@ -131,7 +131,7 @@ describe('Guard Coercion', () => {
 		it('revives stripped POJO Ok Results seamlessly', () => {
 			const guard = is.result(is.number, is.unknown).coerce;
 			const res = guard.parse({ ok: true, value: 42 });
-			
+
 			expect(res.isOk()).toBe(true);
 			const revived = res.unwrap();
 			expect(revived.isOk()).toBe(true);
@@ -142,7 +142,7 @@ describe('Guard Coercion', () => {
 		it('revives stripped POJO Err Results seamlessly', () => {
 			const guard = is.result(is.unknown, is.string).coerce;
 			const res = guard.parse({ ok: false, error: 'failure' });
-			
+
 			expect(res.isOk()).toBe(true);
 			const revived = res.unwrap();
 			expect(revived.isErr()).toBe(true);

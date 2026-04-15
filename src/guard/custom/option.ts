@@ -64,7 +64,7 @@ export interface OptionHelpers<T = unknown> {
 	 */
 	some: {
 		(): Guard<Some<T>>;
-		<G extends Guard<any, any>>(innerGuard: G): Guard<Some<InferGuard<G>>>;
+		<G extends Guard<any>>(innerGuard: G): Guard<Some<InferGuard<G>>>;
 	};
 
 	/**
@@ -116,7 +116,7 @@ export interface OptionGuardFactory {
 	/** Creates an unnarrowed Option guard. */
 	(): OptionGuard<unknown>;
 	/** Creates an Option guard narrowed by the Some value type. */
-	<G extends Guard<any, any>>(innerGuard: G): OptionGuard<InferGuard<G>>;
+	<G extends Guard<any>>(innerGuard: G): OptionGuard<InferGuard<G>>;
 }
 
 export type OptionGuard<T> = Guard<Option<T>, OptionHelpers<T>>;

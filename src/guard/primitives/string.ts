@@ -2,7 +2,7 @@ import { sha1, md5 } from '@noble/hashes/legacy.js';
 import { sha256, sha384, sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { getObjectDepth, isSafeObject } from '../../utils.js';
-import { factory, makeGuard, type Guard, transformer, property } from '../shared.js';
+import { factory, makeGuard, type Guard, transformer, property, JSON_SCHEMA } from '../shared.js';
 
 const ENC = {
 	hex: {
@@ -336,12 +336,10 @@ const stringHelpers: StringHelpers = {
 		}
 	}) as any,
 	hostname: ((v: string) => {
-		try {
-			const url = new URL(v);
-			return url.hostname === v;
-		} catch {
-			return false;
-		}
+		if (typeof v !== 'string' || v.length === 0 || v.length > 253) return false;
+		// RFC 952/1123: labels are alphanumeric + hyphens, separated by dots.
+		// Labels must not start or end with a hyphen.
+		return /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(v);
 	}) as any,
 	emoji: ((v: string) => RGX.emoji.test(v)) as any,
 	uppercase: ((v: string) => v === v.toUpperCase()) as any,
@@ -561,7 +559,10 @@ const stringHelpers: StringHelpers = {
 
 		return {
 			fn: (v: unknown): v is string => typeof v === 'string' && target(v) && formatPredicate(v),
-			meta: { name: `${target.meta.name}.hash` },
+			meta: {
+				name: `${target.meta.name}.hash`,
+				jsonSchema: { ...target.meta.jsonSchema, _format: 'hash', _hashAlg: alg, _hashEnc: enc },
+			},
 			helpers: hashHelpers,
 		} as any;
 	}) as any,
@@ -658,14 +659,16 @@ const stringHelpers: StringHelpers = {
 		transform: (v: string) => v.toUpperCase(),
 	})),
 
-	normalize: transformer<string, string, [any?], StringHelpers>((target, form: 'NFC' | 'NFD' | 'NFKC' | 'NFKD' = 'NFC') => ({
-		fn: (v: unknown): v is string => {
-			const val = target.meta.transform ? target.meta.transform(v, v) : v;
-			return typeof val === 'string' && target(val.normalize(form));
-		},
-		meta: { name: `${target.meta.name}.normalize` },
-		transform: (v: string) => v.normalize(form),
-	})),
+	normalize: transformer<string, string, [any?], StringHelpers>(
+		(target, form: 'NFC' | 'NFD' | 'NFKC' | 'NFKD' = 'NFC') => ({
+			fn: (v: unknown): v is string => {
+				const val = target.meta.transform ? target.meta.transform(v, v) : v;
+				return typeof val === 'string' && target(val.normalize(form));
+			},
+			meta: { name: `${target.meta.name}.normalize` },
+			transform: (v: string) => v.normalize(form),
+		})
+	),
 	iso: property(
 		transformer<string, string, [], IsoHelpers>(target => {
 			const ISO_RE = /^\d{4}-\d{2}-\d{2}/;
@@ -675,15 +678,26 @@ const stringHelpers: StringHelpers = {
 					const val = target.meta.transform ? target.meta.transform(v, v) : v;
 					return typeof val === 'string' && ISO_RE.test(val) && !isNaN(Date.parse(val)) && target(v);
 				},
-				meta: { name: `${target.meta.name}.iso` },
+				meta: {
+					name: `${target.meta.name}.iso`,
+					jsonSchema: { ...target.meta.jsonSchema, format: 'date-time' },
+				},
 				helpers: {
 					date: property(
 						transformer<string, string, [], IsoHelpers>(target => ({
 							fn: (v: unknown): v is string => {
 								const val = target.meta.transform ? target.meta.transform(v, v) : v;
-								return typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val) && !isNaN(Date.parse(val)) && target(v);
+								return (
+									typeof val === 'string' &&
+									/^\d{4}-\d{2}-\d{2}$/.test(val) &&
+									!isNaN(Date.parse(val)) &&
+									target(v)
+								);
 							},
-							meta: { name: `${target.meta.name}.iso.date` },
+							meta: {
+								name: `${target.meta.name}.iso.date`,
+								jsonSchema: { ...target.meta.jsonSchema, format: 'date' },
+							},
 						}))
 					),
 					time: transformer<string, string, [{ precision?: number }?], IsoHelpers>(
@@ -747,7 +761,19 @@ const stringHelpers: StringHelpers = {
 								const val = target.meta.transform ? target.meta.transform(v, v) : v;
 								return typeof val === 'string' && re.test(val) && !isNaN(Date.parse(val));
 							},
-							meta: { name: `${target.meta.name}.iso.datetime` },
+							meta: {
+								name: `${target.meta.name}.iso.datetime`,
+								jsonSchema: {
+									...target.meta.jsonSchema,
+									format: 'date-time',
+									// Preserved for generate() — lets the arbitrary builder match
+									// the exact constraints rather than always using toISOString().
+									_isoDatetime: true,
+									_isoOffset: allowOffset,
+									_isoLocal: allowLocal,
+									_isoPrecision: p,
+								},
+							},
 						};
 					}),
 				} as any,
@@ -837,7 +863,7 @@ const stringHelpers: StringHelpers = {
 					const s = val.toLowerCase();
 					return boolStrVals.truthy.has(s) || boolStrVals.falsy.has(s);
 				},
-				meta: { name: `${target.meta.name}.boolStr`, id: 'string' },
+				meta: { name: `${target.meta.name}.boolStr`, id: 'string', jsonSchema: { ...target.meta.jsonSchema, _format: 'boolStr' } },
 				helpers: { truthy: truthy as any, falsy: falsy as any, asBool: asBool as any } as any,
 			};
 		})
@@ -858,7 +884,10 @@ const stringHelpers: StringHelpers = {
 				if (typeof val !== 'string') return false;
 				try {
 					const parsed = JSON.parse(val);
-					if (options?.type === 'object' && (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)))
+					if (
+						options?.type === 'object' &&
+						(typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+					)
 						return false;
 					if (options?.type === 'array' && !Array.isArray(parsed)) return false;
 					if (options?.schema && !options.schema(parsed)) return false;
@@ -872,15 +901,69 @@ const stringHelpers: StringHelpers = {
 			meta: { name: `${target.meta.name}.parsedJson` },
 			transform: (v: string) => {
 				const parsed = JSON.parse(v);
-				return options?.schema?.meta.transform
-					? options.schema.meta.transform(parsed, parsed)
-					: parsed;
+				return options?.schema?.meta.transform ? options.schema.meta.transform(parsed, parsed) : parsed;
 			},
 			helpers: {},
 			replaceHelpers: true,
 		})
 	),
 };
+
+// JSON Schema contributions — picked up by the proxy when these helpers are applied.
+(stringHelpers.email as any)[JSON_SCHEMA] = () => ({ format: 'email' });
+(stringHelpers.url as any)[JSON_SCHEMA] = () => ({ format: 'uri' });
+(stringHelpers.httpUrl as any)[JSON_SCHEMA] = () => ({ format: 'uri' });
+(stringHelpers.hostname as any)[JSON_SCHEMA] = () => ({ format: 'hostname' });
+(stringHelpers.emoji as any)[JSON_SCHEMA] = () => ({ _format: 'emoji' });
+(stringHelpers.guid as any)[JSON_SCHEMA] = () => ({ format: 'uuid' });
+(stringHelpers.uuidv4 as any)[JSON_SCHEMA] = () => ({ format: 'uuid' });
+(stringHelpers.uuidv6 as any)[JSON_SCHEMA] = () => ({ format: 'uuid' });
+(stringHelpers.uuidv7 as any)[JSON_SCHEMA] = () => ({ format: 'uuid' });
+(stringHelpers.ipv4 as any)[JSON_SCHEMA] = () => ({ format: 'ipv4' });
+(stringHelpers.ipv6 as any)[JSON_SCHEMA] = () => ({ format: 'ipv6' });
+(stringHelpers.ulid as any)[JSON_SCHEMA] = () => ({ format: 'ulid' });
+(stringHelpers.cuid as any)[JSON_SCHEMA] = () => ({ pattern: '^c[a-z0-9]{24}$' });
+(stringHelpers.cuid2 as any)[JSON_SCHEMA] = () => ({ pattern: '^[a-z][a-z0-9]{1,}$' });
+(stringHelpers.cidrv4 as any)[JSON_SCHEMA] = () => ({ _format: 'cidrv4' });
+(stringHelpers.cidrv6 as any)[JSON_SCHEMA] = () => ({ _format: 'cidrv6' });
+(stringHelpers.lowercase as any)[JSON_SCHEMA] = () => ({ pattern: '^[^A-Z]*$' });
+(stringHelpers.uppercase as any)[JSON_SCHEMA] = () => ({ pattern: '^[^a-z]*$' });
+// Factory helpers — receive the same args as the factory, return JSON Schema constraint.
+(stringHelpers.min as any)[JSON_SCHEMA] = (n: number) => ({ minLength: n });
+(stringHelpers.max as any)[JSON_SCHEMA] = (n: number) => ({ maxLength: n });
+(stringHelpers.length as any)[JSON_SCHEMA] = (n: number) => ({ minLength: n, maxLength: n });
+(stringHelpers.regex as any)[JSON_SCHEMA] = (re: RegExp) => ({ pattern: re.source });
+(stringHelpers.includes as any)[JSON_SCHEMA] = (sub: string) => ({
+	pattern: sub.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+});
+(stringHelpers.startsWith as any)[JSON_SCHEMA] = (pfx: string) => ({
+	pattern: `^${pfx.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+});
+(stringHelpers.endsWith as any)[JSON_SCHEMA] = (sfx: string) => ({
+	pattern: `${sfx.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+});
+(stringHelpers.uuid as any)[JSON_SCHEMA] = () => ({ format: 'uuid' });
+(stringHelpers.mac as any)[JSON_SCHEMA] = (options?: { delimiter?: ':' | '-' | '.' | 'none' }) => ({
+	_format: 'mac',
+	_macDelimiter: options?.delimiter ?? ':',
+});
+(stringHelpers.nanoid as any)[JSON_SCHEMA] = (options?: { length?: number }) => ({
+	_format: 'nanoid',
+	_nanoidLength: options?.length ?? 21,
+});
+(stringHelpers.base64 as any)[JSON_SCHEMA] = () => ({ _format: 'base64' });
+(stringHelpers.hex as any)[JSON_SCHEMA] = (options?: {
+	prefix?: boolean;
+	evenLength?: boolean;
+	case?: 'lower' | 'upper' | 'mixed';
+}) => ({
+	_format: 'hex',
+	_hexPrefix: options?.prefix ?? false,
+	_hexCase: options?.case ?? 'mixed',
+	_hexEvenLength: options?.evenLength ?? false,
+});
+(stringHelpers.jwt as any)[JSON_SCHEMA] = () => ({ _format: 'jwt' });
+(stringHelpers.json as any)[JSON_SCHEMA] = () => ({ _format: 'json' });
 
 export const StringGuard: StringGuard = makeGuard(
 	(v: unknown): v is string => typeof v === 'string',

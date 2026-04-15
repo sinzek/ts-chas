@@ -8,7 +8,7 @@ type InferTemplateLiteral<T extends readonly TemplatePart[]> = T extends readonl
 	: T extends readonly [infer Head, ...infer Tail extends readonly TemplatePart[]]
 		? Head extends string
 			? `${Head}${InferTemplateLiteral<Tail>}`
-			: Head extends Guard<any, any>
+			: Head extends Guard<any>
 				? `${InferGuard<Head> & Interpolable}${InferTemplateLiteral<Tail>}`
 				: never
 		: string;
@@ -23,7 +23,7 @@ const templateLiteralHelpers = {};
 
 export const TemplateLiteralGuardFactory: TemplateLiteralGuardFactory = (...parts: TemplatePart[]) => {
 	const regexParts: string[] = ['^'];
-	const guardIndices: { index: number; guard: Guard<any, any> }[] = [];
+	const guardIndices: { index: number; guard: Guard<any> }[] = [];
 	let groupIndex = 0;
 
 	for (const part of parts) {
@@ -61,7 +61,11 @@ export const TemplateLiteralGuardFactory: TemplateLiteralGuardFactory = (...part
 
 	const name = parts.map(p => (typeof p === 'string' ? p : `\${${p.meta.name}}`)).join('');
 
-	return makeGuard(fn, { name: `templateLiteral<\`${name}\`>`, id: 'templateLiteral' }, templateLiteralHelpers);
+	return makeGuard(
+		fn,
+		{ name: `templateLiteral<\`${name}\`>`, id: 'templateLiteral', parts },
+		templateLiteralHelpers
+	);
 };
 
 // ---------------------------------------------------------------------------
@@ -76,7 +80,7 @@ function escapeRegex(s: string): string {
  * Maps a guard to a regex pattern for its capture group.
  * Uses greedy-but-correct patterns based on the guard's id.
  */
-function guardToPattern(guard: Guard<any, any>): string {
+function guardToPattern(guard: Guard<any>): string {
 	const id = guard.meta.id;
 
 	switch (id) {
@@ -114,7 +118,7 @@ function guardToPattern(guard: Guard<any, any>): string {
  * Coerces a captured string back to the primitive type expected by the guard,
  * so that the guard can validate it correctly.
  */
-function coerceCapture(captured: string, guard: Guard<any, any>): unknown {
+function coerceCapture(captured: string, guard: Guard<any>): unknown {
 	const id = guard.meta.id;
 
 	switch (id) {
