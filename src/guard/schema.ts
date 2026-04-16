@@ -47,6 +47,7 @@ import {
 	type GuardErr,
 	evaluateFallback,
 	evaluateError,
+	_registerToSchema,
 } from './shared.js';
 
 /**
@@ -125,7 +126,7 @@ export interface Schema<T> {
 	'~standard': StandardSchemaV1.Props<unknown, T>;
 
 	/**
-	 * Helper type to infer the output type of the schema.
+	 * Helper property to infer the output type of the schema.
 	 */
 	$infer: T;
 }
@@ -641,3 +642,7 @@ function buildSchema<T>(name: string, guard: Guard<T, any>): Schema<T> {
 
 	return schema;
 }
+
+// Register buildSchema into shared.ts so Guard.toSchema() can call it
+// without creating a runtime circular dependency.
+_registerToSchema((name, guard) => buildSchema(name, guard));

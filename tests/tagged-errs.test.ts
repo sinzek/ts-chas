@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ok, err, ResultAsync, okAsync, errAsync } from '../src/result/index.js';
-import { defineErrs } from '../src/tagged-errs.js';
+import { defineErrs, ExcludeErr, ExtractErr, InferErr, InferErrs } from '../src/tagged-errs.js';
 import { Task } from '../src/task.js';
 
 const TestErrs = defineErrs({
@@ -99,7 +99,7 @@ describe('Error Context', () => {
 
 	describe('Task.context', () => {
 		it('should attach context to a Task error', async () => {
-			const task = new Task(() => ResultAsync.fromResult(err(TestErrs.NotFound('user')))).context('task step');
+			const task = new Task(() => ResultAsync.from(err(TestErrs.NotFound('user')))).context('task step');
 
 			const result = await task.execute();
 			if (result.isErr()) {
@@ -108,13 +108,38 @@ describe('Error Context', () => {
 		});
 
 		it('should not affect Task Ok results', async () => {
-			const task = new Task(() => ResultAsync.fromResult(ok(42))).context('task step');
+			const task = new Task(() => ResultAsync.from(ok(42))).context('task step');
 
 			const result = await task.execute();
 			expect(result.isOk()).toBe(true);
 			if (result.isOk()) {
 				expect(result.value).toBe(42);
 			}
+		});
+	});
+
+	describe('ExtractErr and ExcludeErr', () => {
+		it('should extract a specific error variant from a TaggedErr union', () => {
+			const AppError = defineErrs({
+				NotFound: () => ({ resource: 'user' }),
+				Validation: (field: string) => ({ field }),
+			});
+			type AppError = InferErrs<typeof AppError>;
+			type _NotFound = ExtractErr<AppError, 'NotFound'>;
+			type _Validation = ExtractErr<AppError, 'Validation'>;
+		});
+
+		it('should exclude a specific error variant from a TaggedErr union', () => {
+			const AppError = defineErrs({
+				NotFound: () => ({ resource: 'user' }),
+				Validation: (field: string) => ({ field }),
+			});
+			type AppError = InferErrs<typeof AppError>;
+			type _NotFoundErr = InferErr<typeof AppError.NotFound>;
+			type _AppErrorWithoutNotFound = ExcludeErr<AppError, 'NotFound'>;
+
+			type _inferredNotFound = typeof AppError.NotFound.$infer;
+			type _inferredValidation = typeof AppError.Validation.$infer;
 		});
 	});
 });

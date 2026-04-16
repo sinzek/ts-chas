@@ -794,3 +794,107 @@ describe('edge cases', () => {
 		expect(schemas.User.parse({ name: 'Chase', bio: 123 }).isErr()).toBe(true);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// guard.toSchema()
+// ---------------------------------------------------------------------------
+
+describe('guard.toSchema()', () => {
+	it('creates a schema with the given name', () => {
+		const schema = is.string.toSchema('Email');
+		expect(schema.meta.name).toBe('Email');
+	});
+
+	it('parse() returns Ok for valid values', () => {
+		const schema = is.string.toSchema('Email');
+		expect(schema.parse('hello').isOk()).toBe(true);
+	});
+
+	it('parse() returns Err for invalid values', () => {
+		const schema = is.string.toSchema('Email');
+		expect(schema.parse(42).isErr()).toBe(true);
+	});
+
+	it('includes the schema name in error paths', () => {
+		const schema = is.string.toSchema('MySchema');
+		const result = schema.parse(42);
+		expect(result.isErr()).toBe(true);
+		if (result.isErr()) {
+			expect(result.error[0]!.path[0]).toBe('MySchema');
+		}
+	});
+
+	it('collects all errors from an object guard', () => {
+		const schema = is.object({ name: is.string, age: is.number }).toSchema('User');
+		const result = schema.parse({ name: 123, age: 'old' });
+		expect(result.isErr()).toBe(true);
+		if (result.isErr()) {
+			expect(result.error.length).toBe(2);
+			const paths = result.error.map(e => e.path.join('.'));
+			expect(paths).toContain('User.name');
+			expect(paths).toContain('User.age');
+		}
+	});
+
+	it('assert() returns the value for valid data', () => {
+		const schema = is.object({ name: is.string }).toSchema('User');
+		expect(schema.assert({ name: 'Chase' })).toEqual({ name: 'Chase' });
+	});
+
+	it('assert() throws AggregateGuardError for invalid data', () => {
+		const schema = is.object({ name: is.string }).toSchema('User');
+		expect(() => schema.assert({ name: 123 })).toThrow(AggregateGuardError);
+	});
+
+	it('is() delegates to the underlying guard', () => {
+		const schema = is.string.toSchema('Email');
+		expect(schema.is('hello')).toBe(true);
+		expect(schema.is(42)).toBe(false);
+	});
+
+	it('exposes the underlying guard on .guard', () => {
+		const schema = is.string.toSchema('Email');
+		expect(typeof schema.guard).toBe('function');
+		expect(schema.guard('hello')).toBe(true);
+		expect(schema.guard(42)).toBe(false);
+	});
+
+	it('produces the same result as defineSchema for the same guard', () => {
+		const guard = is.object({ name: is.string, age: is.number });
+		const viaMethod = guard.toSchema('User');
+		const viaFn = defineSchema('User', guard);
+
+		const valid = { name: 'Chase', age: 25 };
+		const invalid = { name: 123, age: 'old' };
+
+		expect(viaMethod.parse(valid).isOk()).toBe(viaFn.parse(valid).isOk());
+		expect(viaMethod.parse(invalid).isErr()).toBe(viaFn.parse(invalid).isErr());
+
+		const methodErrs = viaMethod.parse(invalid);
+		const fnErrs = viaFn.parse(invalid);
+		if (methodErrs.isErr() && fnErrs.isErr()) {
+			expect(methodErrs.error.length).toBe(fnErrs.error.length);
+		}
+	});
+
+	it('works inline on a chained guard', () => {
+		const schema = is.string.trim().email.toSchema('Email');
+		expect(schema.parse('  user@example.com  ').isOk()).toBe(true);
+		expect(schema.parse('  not-an-email  ').isErr()).toBe(true);
+	});
+
+	it('is Standard Schema V1 compliant', () => {
+		const schema = is.object({ name: is.string }).toSchema('User');
+		const standard = schema['~standard'];
+		expect(standard.version).toBe(1);
+		expect(standard.vendor).toBe('chas');
+		expect(typeof standard.validate).toBe('function');
+	});
+
+	it('infers the correct output type (compile-time)', () => {
+		const schema = is.object({ name: is.string, age: is.number }).toSchema('User');
+		type User = typeof schema.$infer;
+		const _check: User = { name: 'Chase', age: 25 };
+		expect(true).toBe(true);
+	});
+});

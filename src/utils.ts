@@ -43,6 +43,62 @@ export type ExtractErrorFromTarget<Target extends CatchTarget, E> = [E] extends 
 				toString: () => string;
 			};
 
+/**
+ * Type that defines handlers for each tag in an error union E.
+ * U defaults to `any` to allow use as a constraint without locking return types.
+ */
+export type TagHandlers<E, U = any> = {
+	[K in Extract<E, { _tag: string }>['_tag']]: (error: Extract<E, { _tag: K }>) => U;
+};
+
+/**
+ * Type that defines exhaustive handlers for a Result error E.
+ *
+ * - All tagged variants require a matching tag handler.
+ * - An `err` handler is ONLY required when the union contains non-tagged members
+ *   (e.g. plain `Error` or other untagged types).
+ * - If the union is entirely composed of tagged errors, `err` must not be present.
+ * - Extraneous keys (beyond `ok`, tag names, and `err`) are rejected.
+ */
+export type ResultErrHandlers<E, U = any> = TagHandlers<E, U> &
+	([Exclude<E, { _tag: string }>] extends [never]
+		? { err?: never }
+		: { err: (error: Exclude<E, { _tag: string }>) => U });
+
+/**
+ * Type that defines partial tag handlers for a Result error E, with a required wildcard _.
+ * Extraneous keys (beyond `ok`, tag names, and `_`) are rejected.
+ */
+export type ResultPartialErrHandlers<E, U = any> = Partial<TagHandlers<E, U>> & { _: (error: E) => U };
+
+/**
+ * Extracts the union of all return types from a handlers object.
+ * Handles optional properties gracefully (e.g. `err?: never`).
+ */
+export type HandlerReturnType<H> = H extends Record<string, ((...args: any) => any) | undefined>
+	? ReturnType<Exclude<H[keyof H], undefined>>
+	: never;
+
+/**
+ * The set of keys allowed in a `matchTag` call for error union E.
+ * Any key outside this set is considered extraneous and rejected.
+ */
+export type AllowedMatchTagKeys<E> = 'ok' | Extract<E, { _tag: string }>['_tag'] | 'err';
+
+/**
+ * The set of keys allowed in a `matchTagPartial` call for error union E.
+ */
+export type AllowedMatchTagPartialKeys<E> = 'ok' | Extract<E, { _tag: string }>['_tag'] | '_';
+
+/**
+ * Maps every key in H that is NOT in `Allowed` to `never`.
+ * When intersected into a parameter type, this forces TypeScript to reject
+ * object literals that contain unexpected properties.
+ */
+export type NoExtraKeys<H, Allowed extends string | number | symbol> = {
+	[K in keyof H as K extends Allowed ? never : K]: never;
+};
+
 // A utility type that checks if T exhaustively covers all members of U.
 type ExhaustiveArray<T extends readonly any[], U> = [U] extends [T[number]] ? T : [...T, Exclude<U, T[number]>];
 

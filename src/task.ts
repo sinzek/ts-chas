@@ -8,7 +8,12 @@ import {
 	collectAsync as resultCollectAsync,
 } from './result/result-helpers.js';
 import { type Option } from './option.js';
-import type { CatchTag, CatchTarget, ExtractErrorFromTarget } from './utils.js';
+import type {
+	CatchTag,
+	CatchTarget,
+	ExtractErrorFromTarget,
+	UnionToIntersection,
+} from './utils.js';
 
 /**
  * A promise-like wrapper with chaining, mapping, error handling, and resilience logic that evaluates to a ResultAsync.
@@ -19,13 +24,13 @@ import type { CatchTag, CatchTarget, ExtractErrorFromTarget } from './utils.js';
  * const result = await task.execute();
  * ```
  */
-export class Task<T, E> {
-	private readonly run: (ctx?: any) => ResultAsync<T, E>;
+export class Task<T, E, C = void> {
+	private readonly run: (ctx: C, signal?: AbortSignal) => ResultAsync<T, E>;
 
-	constructor(run: (ctx?: any) => ResultAsync<T, E> | Promise<Result<T, E>>) {
-		this.run = ctx => {
+	constructor(run: (ctx: C, signal?: AbortSignal) => ResultAsync<T, E> | Promise<Result<T, E>>) {
+		this.run = (ctx, signal) => {
 			try {
-				const res = run(ctx);
+				const res = run(ctx, signal);
 				if (res instanceof ResultAsync) return res;
 				return fromPromise(res as Promise<Result<T, E>>, e => err(e as any)).andThen(v => v) as any;
 			} catch (e) {
@@ -35,16 +40,40 @@ export class Task<T, E> {
 	}
 
 	/**
-	 * Creates a Task from a Promise and an error mapper.
-	 * @param fn function that returns a Promise
-	 * @param onError function that maps an unknown error to an error of type E
-	 * @returns a Task
+	 * Creates a Task from a function that returns a `Result`, a `Promise<Result>`, a plain value, or a `Promise<T>`.
+	 *
+	 * Two workflows:
+	 * - **Define-with-Result**: `fn` explicitly returns `ok()`/`err()` — Result is passed through as-is.
+	 * - **Plain value / wrap-a-thrower**: `fn` returns `T` or `Promise<T>` — the value is auto-wrapped in `ok()`,
+	 *   and any throws or rejections are caught and wrapped in `err()`.
+	 *
+	 * @example
+	 * ```ts
+	 * // Define-with-Result
+	 * const findUser = Task.from(async () => {
+	 *     const user = await db.find(id);
+	 *     if (!user) return chas.err('NOT_FOUND' as const);
+	 *     return chas.ok(user);
+	 * });
+	 *
+	 * // Plain value / wrap-a-thrower
+	 * const parse = Task.from(() => JSON.parse(raw), e => new SyntaxError(String(e)));
+	 * ```
 	 */
-	static from<T, E = unknown>(
-		fn: () => Promise<T>,
-		onError?: (e: unknown) => E
-	): Task<T, E extends null | undefined ? unknown : E> {
-		return new Task(() => fromPromise(fn(), onError));
+	static from<T, E = unknown, C = void>(
+		fn: (ctx: C, signal?: AbortSignal) => PromiseLike<T>,
+		onThrow?: (error: unknown) => E
+	): Task<T, E extends null | undefined ? unknown : E, C>;
+	static from<T, E, C = void>(
+		fn: (ctx: C, signal?: AbortSignal) => Result<T, E> | PromiseLike<Result<T, E>>,
+		onThrow?: (error: unknown) => E
+	): Task<T, E, C>;
+	static from<T, E = unknown, C = void>(
+		fn: (ctx: C, signal?: AbortSignal) => T,
+		onThrow?: (error: unknown) => E
+	): Task<T, E extends null | undefined ? unknown : E, C>;
+	static from(fn: (ctx: any, signal?: AbortSignal) => any, onThrow?: (error: unknown) => any): Task<any, any, any> {
+		return new Task((ctx, signal) => ResultAsync.from(() => fn(ctx, signal), onThrow) as ResultAsync<any, any>);
 	}
 
 	/**
@@ -52,7 +81,7 @@ export class Task<T, E> {
 	 *
 	 * @returns a Task
 	 */
-	static ask<C>(): Task<C, never> {
+	static ask<C>(): Task<C, never, C> {
 		return new Task(
 			ctx => ResultAsync.fromSafePromise(Promise.resolve(ctx as C)) as unknown as ResultAsync<C, never>
 		);
@@ -75,11 +104,11 @@ export class Task<T, E> {
 	 */
 	static go<Y, T>(
 		generator: () => Generator<Y, T, unknown>
-	): Extract<Y, Task<unknown, unknown> | ResultAsync<unknown, unknown>> extends never
-		? Task<T, UnwrapErr<Y>>
-		: Task<T, UnwrapErr<Y>>;
-	static go<Y, T>(generator: () => AsyncGenerator<Y, T, unknown>): Task<T, UnwrapErr<Y>>;
-	static go(generator: () => Generator<any, any, any> | AsyncGenerator<any, any, any>): Task<any, any> {
+	): Extract<Y, Task<unknown, unknown, any> | ResultAsync<unknown, unknown>> extends never
+		? Task<T, UnwrapErr<Y>, any>
+		: Task<T, UnwrapErr<Y>, any>;
+	static go<Y, T>(generator: () => AsyncGenerator<Y, T, unknown>): Task<T, UnwrapErr<Y>, any>;
+	static go(generator: () => Generator<any, any, any> | AsyncGenerator<any, any, any>): Task<any, any, any> {
 		return new Task(() => {
 			const res = go(generator as any);
 			if (res instanceof ResultAsync) return res as ResultAsync<any, any>;
@@ -101,10 +130,18 @@ export class Task<T, E> {
 	 * const result = await chas.Task.all(tasks); // Ok([1, 2]) or Err(error1) or Err(error2)
 	 * ```
 	 */
-	static all<T, E>(tasks: Iterable<Task<T, E>>): Task<T[], E> {
-		return new Task(ctx => {
-			const asyncResults = Array.from(tasks).map(t => t.run(ctx));
-			return resultAllAsync(asyncResults) as unknown as ResultAsync<T[], E>;
+	static all<T extends Task<any, any, any>[]>(
+		tasks: [...T]
+	): Task<
+		{ [K in keyof T]: T[K] extends Task<infer A, any, any> ? A : never },
+		T[number] extends Task<any, infer E, any> ? E : never,
+		UnionToIntersection<T[number] extends Task<any, any, infer C> ? C : void>
+	>;
+	static all<T, E, C = void>(tasks: Iterable<Task<T, E, C>>): Task<T[], E, C>;
+	static all(tasks: Iterable<any>): any {
+		return new Task((ctx, signal) => {
+			const asyncResults = Array.from(tasks).map(t => t.run(ctx, signal));
+			return resultAllAsync(asyncResults) as unknown as ResultAsync<any[], any>;
 		});
 	}
 
@@ -120,9 +157,17 @@ export class Task<T, E> {
 	 * const result = await chas.Task.race(tasks); // Ok(1) or Ok(2) or Err(error1) or Err(error2)
 	 * ```
 	 */
-	static race<T, E>(tasks: Iterable<Task<T, E>>): Task<T, E> {
-		return new Task(ctx => {
-			const promises = Array.from(tasks).map(t => t.run(ctx));
+	static race<T extends Task<any, any, any>[]>(
+		tasks: [...T]
+	): Task<
+		T[number] extends Task<infer A, any, any> ? A : never,
+		T[number] extends Task<any, infer E, any> ? E : never,
+		UnionToIntersection<T[number] extends Task<any, any, infer C> ? C : void>
+	>;
+	static race<T, E, C = void>(tasks: Iterable<Task<T, E, C>>): Task<T, E, C>;
+	static race(tasks: Iterable<any>): any {
+		return new Task((ctx, signal) => {
+			const promises = Array.from(tasks).map(t => t.run(ctx, signal));
 			return new ResultAsync(Promise.race(promises));
 		});
 	}
@@ -139,10 +184,18 @@ export class Task<T, E> {
 	 * const result = await chas.Task.any(tasks); // Ok(1) or Ok(2) or Err([error1, error2])
 	 * ```
 	 */
-	static any<T, E>(tasks: Iterable<Task<T, E>>): Task<T, E[]> {
-		return new Task(ctx => {
-			const asyncResults = Array.from(tasks).map(t => t.run(ctx));
-			return resultAnyAsync(asyncResults) as unknown as ResultAsync<T, E[]>;
+	static any<T extends Task<any, any, any>[]>(
+		tasks: [...T]
+	): Task<
+		T[number] extends Task<infer A, any, any> ? A : never,
+		{ [K in keyof T]: T[K] extends Task<any, infer E, any> ? E : never },
+		UnionToIntersection<T[number] extends Task<any, any, infer C> ? C : void>
+	>;
+	static any<T, E, C = void>(tasks: Iterable<Task<T, E, C>>): Task<T, E[], C>;
+	static any(tasks: Iterable<any>): any {
+		return new Task((ctx, signal) => {
+			const asyncResults = Array.from(tasks).map(t => t.run(ctx, signal));
+			return resultAnyAsync(asyncResults) as unknown as ResultAsync<any, any[]>;
 		});
 	}
 
@@ -159,10 +212,18 @@ export class Task<T, E> {
 	 * const result = await chas.Task.collect(tasks); // Ok([1, 2]) or Err([error1, error2])
 	 * ```
 	 */
-	static collect<T, E>(tasks: Iterable<Task<T, E>>): Task<T[], E[]> {
-		return new Task(ctx => {
-			const asyncResults = Array.from(tasks).map(t => t.run(ctx));
-			return resultCollectAsync(asyncResults) as unknown as ResultAsync<T[], E[]>;
+	static collect<T extends Task<any, any, any>[]>(
+		tasks: [...T]
+	): Task<
+		{ [K in keyof T]: T[K] extends Task<infer A, any, any> ? A : never },
+		{ [K in keyof T]: T[K] extends Task<any, infer E, any> ? E : never },
+		UnionToIntersection<T[number] extends Task<any, any, infer C> ? C : void>
+	>;
+	static collect<T, E, C = void>(tasks: Iterable<Task<T, E, C>>): Task<T[], E[], C>;
+	static collect(tasks: Iterable<any>): any {
+		return new Task((ctx, signal) => {
+			const asyncResults = Array.from(tasks).map(t => t.run(ctx, signal));
+			return resultCollectAsync(asyncResults) as unknown as ResultAsync<any[], any[]>;
 		});
 	}
 
@@ -180,11 +241,20 @@ export class Task<T, E> {
 	 * const result = await chas.Task.parallel(tasks, 1); // Executes sequentially, returns Ok([1, 2])
 	 * ```
 	 */
-	static parallel<T, E>(tasks: Iterable<Task<T, E>>, concurrency: number): Task<T[], E> {
-		return new Task(ctx => {
-			const taskArray = Array.from(tasks);
+	static parallel<T extends Task<any, any, any>[]>(
+		tasks: [...T],
+		concurrency: number
+	): Task<
+		{ [K in keyof T]: T[K] extends Task<infer A, any, any> ? A : never },
+		T[number] extends Task<any, infer E, any> ? E : never,
+		UnionToIntersection<T[number] extends Task<any, any, infer C> ? C : void>
+	>;
+	static parallel<T, E, C = void>(tasks: Iterable<Task<T, E, C>>, concurrency: number): Task<T[], E, C>;
+	static parallel<T, E, C = void>(tasks: Iterable<any>, concurrency: number): any {
+		return new Task((ctx, signal) => {
+			const taskArray = Array.from(tasks) as Task<T, E, C>[];
 			if (taskArray.length === 0)
-				return ResultAsync.fromSafePromise(Promise.resolve([] as T[])) as unknown as ResultAsync<T[], E>;
+				return ResultAsync.fromSafePromise(Promise.resolve([])) as unknown as ResultAsync<any[], any>;
 
 			const results: T[] = new Array(taskArray.length);
 			let completedCount = 0;
@@ -197,7 +267,7 @@ export class Task<T, E> {
 			});
 
 			const next = () => {
-				if (firstError !== undefined) return;
+				if (firstError !== undefined || signal?.aborted) return;
 				if (completedCount === taskArray.length) {
 					resolvePromise(ok(results));
 					return;
@@ -207,8 +277,8 @@ export class Task<T, E> {
 					const index = startedCount++;
 					const task = taskArray[index];
 					if (!task) continue;
-					task.run(ctx).then(res => {
-						if (firstError !== undefined) return;
+					task.run(ctx as C, signal).then(res => {
+						if (firstError !== undefined || signal?.aborted) return;
 						if (res.isOk()) {
 							results[index] = res.value;
 							completedCount++;
@@ -229,7 +299,7 @@ export class Task<T, E> {
 	/**
 	 * Creates a Task that resolves to Ok(undefined).
 	 */
-	static void(): Task<void, never> {
+	static void(): Task<void, never, void> {
 		return new Task(() => ResultAsync.fromSafePromise(Promise.resolve(undefined as void)));
 	}
 
@@ -239,7 +309,7 @@ export class Task<T, E> {
 	 * @param onNone function that returns an error if the Option is None
 	 * @returns a Task
 	 */
-	static fromOption<T, E>(option: Option<T>, onNone: () => E): Task<T, E> {
+	static fromOption<T, E, C = void>(option: Option<T>, onNone: () => E): Task<T, E, C> {
 		return new Task(() =>
 			option.isSome()
 				? (ResultAsync.fromSafePromise(Promise.resolve(option.value)) as unknown as ResultAsync<T, E>)
@@ -253,8 +323,8 @@ export class Task<T, E> {
 	 * @param context context value
 	 * @returns a Task
 	 */
-	provide(context: any): Task<T, E> {
-		return new Task(() => this.run(context));
+	provide(context: C): Task<T, E, void> {
+		return new Task((_, signal) => this.run(context, signal));
 	}
 
 	/**
@@ -266,17 +336,17 @@ export class Task<T, E> {
 	 * @param use function that uses the resource and returns a Task
 	 * @returns a Task
 	 */
-	static using<R, T, E>(
-		acquire: Task<R, E>,
+	static using<R, T, E, C1 = void, C2 = void>(
+		acquire: Task<R, E, C1>,
 		release: (res: R) => Promise<void> | void,
-		use: (res: R) => Task<T, E>
-	): Task<T, E> {
-		return new Task(ctx => {
-			return acquire.run(ctx).andThen(res => {
+		use: (res: R) => Task<T, E, C2>
+	): Task<T, E, C1 & C2> {
+		return new Task((ctx, signal) => {
+			return acquire.run(ctx as any, signal).andThen(res => {
 				return new ResultAsync(
 					Promise.resolve(
 						use(res)
-							.run(ctx)
+							.run(ctx as any, signal)
 							.then(async result => {
 								try {
 									await release(res);
@@ -303,9 +373,9 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(2)
 	 * ```
 	 */
-	chain<U>(next: (arg: T) => Task<U, E>): Task<U, E> {
+	chain<U, E2 = E, C2 = void>(next: (arg: T) => Task<U, E2, C2>): Task<U, E | E2, C & C2> {
 		return new Task(
-			ctx => this.run(ctx).andThen(val => next(val).run(ctx)) // short-circuits on error
+			(ctx, signal) => this.run(ctx as any, signal).andThen(val => next(val).run(ctx as any, signal)) // short-circuits on error
 		);
 	}
 
@@ -320,8 +390,8 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(2)
 	 * ```
 	 */
-	map<U>(fn: (arg: T) => U): Task<U, E> {
-		return new Task(ctx => this.run(ctx).map(fn));
+	map<U>(fn: (arg: T) => U): Task<U, E, C> {
+		return new Task((ctx, signal) => this.run(ctx, signal).map(fn));
 	}
 
 	/**
@@ -335,8 +405,8 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err(message)
 	 * ```
 	 */
-	mapErr<F>(fn: (error: E) => F): Task<T, F> {
-		return new Task(ctx => this.run(ctx).mapErr(fn));
+	mapErr<F>(fn: (error: E) => F): Task<T, F, C> {
+		return new Task((ctx, signal) => this.run(ctx, signal).mapErr(fn));
 	}
 
 	/**
@@ -347,8 +417,8 @@ export class Task<T, E> {
 	 * @param ctx A string description or metadata object describing the current step.
 	 * @returns A new Task with context attached to the error (if Err).
 	 */
-	context(ctx: string | Record<string, unknown>): Task<T, E> {
-		return new Task(ctx2 => this.run(ctx2).context(ctx));
+	context(ctx: string | Record<string, unknown>): Task<T, E, C> {
+		return new Task((ctx2, signal) => this.run(ctx2, signal).context(ctx));
 	}
 
 	/**
@@ -363,14 +433,14 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err(error)
 	 * ```
 	 */
-	retry(count: number, options?: { delay?: number; factor?: number }): Task<T, E> {
-		return new Task(ctx => {
+	retry(count: number, options?: { delay?: number; factor?: number }): Task<T, E, C> {
+		return new Task((ctx, signal) => {
 			const delay = options?.delay ?? 0;
 			const factor = options?.factor ?? 1;
 
 			const attempt = (remaining: number, currentDelay: number): ResultAsync<T, E> => {
-				return this.run(ctx).orElse(error => {
-					if (remaining <= 0) return errAsync(error);
+				return this.run(ctx, signal).orElse(error => {
+					if (remaining <= 0 || signal?.aborted) return errAsync(error);
 
 					if (currentDelay > 0) {
 						return new ResultAsync(
@@ -401,34 +471,36 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err(error)
 	 * ```
 	 */
-	circuitBreaker(options: { threshold: number; resetTimeout: number }): Task<T, E> {
-		let failures = 0;
-		let lastFailureTime = 0;
-		let state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+	circuitBreaker(
+		options: { threshold: number; resetTimeout: number },
+		sharedState?: CircuitBreakerState
+	): Task<T, E, C> {
+		const internalState: CircuitBreakerState = { failures: 0, lastFailureTime: 0, state: 'CLOSED' };
 
-		return new Task(ctx => {
+		return new Task((ctx, signal) => {
+			const s = sharedState ?? internalState;
 			const now = Date.now();
 
-			if (state === 'OPEN') {
-				if (now - lastFailureTime > options.resetTimeout) {
-					state = 'HALF_OPEN';
+			if (s.state === 'OPEN') {
+				if (now - s.lastFailureTime > options.resetTimeout) {
+					s.state = 'HALF_OPEN';
 				} else {
 					return errAsync('CIRCUIT_OPEN' as any);
 				}
 			}
 
-			return this.run(ctx)
+			return this.run(ctx, signal)
 				.tap(() => {
-					if (state === 'HALF_OPEN') {
-						state = 'CLOSED';
-						failures = 0;
+					if (s.state === 'HALF_OPEN') {
+						s.state = 'CLOSED';
+						s.failures = 0;
 					}
 				})
 				.tapErr(() => {
-					failures++;
-					lastFailureTime = Date.now();
-					if (failures >= options.threshold) {
-						state = 'OPEN';
+					s.failures++;
+					s.lastFailureTime = Date.now();
+					if (s.failures >= options.threshold) {
+						s.state = 'OPEN';
 					}
 				});
 		});
@@ -445,40 +517,41 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err(error)
 	 * ```
 	 */
-	throttle(concurrency: number): Task<T, E> {
-		let active = 0;
-		const queue: Array<() => void> = [];
+	throttle(concurrency: number, sharedState?: ThrottleState): Task<T, E, C> {
+		const internalState: ThrottleState = { active: 0, queue: [] };
 
-		const next = () => {
-			if (queue.length > 0 && active < concurrency) {
-				const run = queue.shift()!;
-				run();
-			}
-		};
+		return new Task((ctx, signal) => {
+			const s = sharedState ?? internalState;
 
-		return new Task(ctx => {
+			const next = () => {
+				if (s.queue.length > 0 && s.active < concurrency) {
+					const run = s.queue.shift()!;
+					run();
+				}
+			};
+
 			return new ResultAsync(
 				new Promise<Result<T, E>>((resolve, reject) => {
 					const execute = () => {
-						active++;
-						this.run(ctx).then(
+						s.active++;
+						this.run(ctx, signal).then(
 							res => {
-								active--;
+								s.active--;
 								next();
 								resolve(res);
 							},
 							e => {
-								active--;
+								s.active--;
 								next();
 								reject(e);
 							}
 						);
 					};
 
-					if (active < concurrency) {
+					if (s.active < concurrency) {
 						execute();
 					} else {
-						queue.push(execute);
+						s.queue.push(execute);
 					}
 				})
 			);
@@ -497,8 +570,10 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err(error)
 	 * ```
 	 */
-	orElse<F>(fn: (error: E) => Task<T, F>): Task<T, F> {
-		return new Task(ctx => this.run(ctx).orElse(e => fn(e).run(ctx) as any) as any);
+	orElse<F, C2 = void>(fn: (error: E) => Task<T, F, C2>): Task<T, F, C & C2> {
+		return new Task(
+			(ctx, signal) => this.run(ctx as any, signal).orElse(e => fn(e).run(ctx as any, signal) as any) as any
+		);
 	}
 
 	/**
@@ -508,7 +583,7 @@ export class Task<T, E> {
 	 * @param other The task to run if this one fails.
 	 * @returns a Task
 	 */
-	fallback(other: Task<T, E>): Task<T, E> {
+	fallback<C2 = void>(other: Task<T, E, C2>): Task<T, E, C & C2> {
 		return this.orElse(() => other);
 	}
 
@@ -525,11 +600,17 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err(error)
 	 * ```
 	 */
-	catchTag<Target extends CatchTarget, E2 = never>(
+	catchTag<Target extends CatchTarget, E2 = never, C2 = void>(
 		target: Target,
-		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => Task<T, E2>
-	): Task<T, Exclude<E, { _tag: CatchTag<Target> }> | E2> {
-		return new Task(ctx => this.run(ctx).catchTag(target as any, e => handler(e as any).run(ctx) as any) as any);
+		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => Task<T, E2, C2>
+	): Task<T, Exclude<E, { _tag: CatchTag<Target> }> | E2, C & C2> {
+		return new Task(
+			(ctx, signal) =>
+				this.run(ctx as any, signal).catchTag(
+					target as any,
+					e => handler(e as any).run(ctx as any, signal) as any
+				) as any
+		);
 	}
 
 	/**
@@ -544,8 +625,8 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1)
 	 * ```
 	 */
-	tap(fn: (value: T) => void | Promise<void>): Task<T, E> {
-		return new Task(ctx => this.run(ctx).tap(fn));
+	tap(fn: (value: T) => void | Promise<void>): Task<T, E, C> {
+		return new Task((ctx, signal) => this.run(ctx, signal).tap(fn));
 	}
 
 	/**
@@ -560,15 +641,15 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1)
 	 * ```
 	 */
-	tapErr(fn: (error: E) => void | Promise<void>): Task<T, E> {
-		return new Task(ctx => this.run(ctx).tapErr(fn));
+	tapErr(fn: (error: E) => void | Promise<void>): Task<T, E, C> {
+		return new Task((ctx, signal) => this.run(ctx, signal).tapErr(fn));
 	}
 
 	tapTag<Target extends CatchTarget>(
 		target: Target,
 		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => void | Promise<void>
-	): Task<T, E> {
-		return new Task(ctx => this.run(ctx).tapTag(target, handler));
+	): Task<T, E, C> {
+		return new Task((ctx, signal) => this.run(ctx, signal).tapTag(target, handler));
 	}
 
 	/**
@@ -584,13 +665,13 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1) or Err('timeout')
 	 * ```
 	 */
-	timeout(ms: number, onTimeout: () => E): Task<T, E> {
-		return new Task(ctx => {
+	timeout(ms: number, onTimeout: () => E): Task<T, E, C> {
+		return new Task((ctx, signal) => {
 			const timeoutPromise = new Promise<Result<T, E>>((_, reject) =>
 				setTimeout(() => reject('TIMEOUT_INTERNAL'), ms)
 			);
 			return new ResultAsync(
-				Promise.race([this.run(ctx).then(res => res), timeoutPromise]).catch(e =>
+				Promise.race([this.run(ctx, signal).then(res => res), timeoutPromise]).catch(e =>
 					e === 'TIMEOUT_INTERNAL' ? err(onTimeout()) : err(e as E)
 				)
 			);
@@ -610,10 +691,10 @@ export class Task<T, E> {
 	 * const result = await task.execute(); // Ok(1)
 	 * ```
 	 */
-	delay(ms: number): Task<T, E> {
-		return new Task(ctx => {
+	delay(ms: number): Task<T, E, C> {
+		return new Task((ctx, signal) => {
 			const wait = new Promise(resolve => setTimeout(resolve, ms));
-			return new ResultAsync(wait.then(() => this.run(ctx).then(res => res)));
+			return new ResultAsync(wait.then(() => this.run(ctx, signal).then(res => res)));
 		});
 	}
 
@@ -623,13 +704,13 @@ export class Task<T, E> {
 	 * @param signal The signal to bind.
 	 * @returns a Task
 	 */
-	withSignal(signal: AbortSignal): Task<T, E> {
+	withSignal(signal: AbortSignal): Task<T, E, C> {
 		return new Task(ctx => {
 			if (signal.aborted) return errAsync(signal.reason ?? 'ABORTED');
 			const abortPromise = new Promise<Result<T, E>>((_, reject) => {
 				signal.addEventListener('abort', () => reject(signal.reason ?? 'ABORTED'), { once: true });
 			});
-			return new ResultAsync(Promise.race([this.run(ctx), abortPromise]).catch(e => err(e)));
+			return new ResultAsync(Promise.race([this.run(ctx, signal), abortPromise]).catch(e => err(e)));
 		});
 	}
 
@@ -646,8 +727,15 @@ export class Task<T, E> {
 	 * ```
 	 */
 	async execute(signal?: AbortSignal): Promise<Result<T, E>> {
-		if (signal) return this.withSignal(signal).run(undefined);
-		return this.run(undefined);
+		if (signal) return this.withSignal(signal).run(undefined as any, signal);
+		return this.run(undefined as any);
+	}
+
+	/**
+	 * Unwraps a nested Task. Current Task T must extend a Task.
+	 */
+	flatten(): T extends Task<infer U, infer E2, infer C2> ? Task<U, E | E2, C & C2> : this {
+		return this.chain(t => t as any) as any;
 	}
 
 	/**
@@ -662,15 +750,15 @@ export class Task<T, E> {
 	 * ```
 	 */
 	async unwrap(): Promise<T> {
-		return this.run(undefined).then(res => res.unwrap());
+		return this.run(undefined as any).then(res => res.unwrap());
 	}
 
 	*[Symbol.iterator](): Generator<ResultAsync<T, E>, T, any> {
-		return yield* this.run(undefined);
+		return yield* this.run(undefined as any);
 	}
 
 	async *[Symbol.asyncIterator](): AsyncGenerator<Result<T, E>, T, any> {
-		return yield* this.run(undefined);
+		return yield* this.run(undefined as any);
 	}
 
 	/**
@@ -678,11 +766,11 @@ export class Task<T, E> {
 	 *
 	 * @returns a Task
 	 */
-	once(): Task<T, E> {
+	once(): Task<T, E, C> {
 		let cached: ResultAsync<T, E> | undefined;
-		return new Task(ctx => {
+		return new Task((ctx, signal) => {
 			if (cached) return cached;
-			cached = this.run(ctx);
+			cached = this.run(ctx, signal);
 			return cached;
 		});
 	}
@@ -693,11 +781,11 @@ export class Task<T, E> {
 	 * @param options configuration for caching.
 	 * @returns a Task
 	 */
-	memoize(options?: { ttl?: number; cacheErr?: boolean }): Task<T, E> {
+	memoize(options?: { ttl?: number; cacheErr?: boolean }): Task<T, E, C> {
 		let cached: { result: Result<T, E>; timestamp: number } | undefined;
 		let pending: Promise<Result<T, E>> | undefined;
 
-		return new Task(ctx => {
+		return new Task((ctx, signal) => {
 			const now = Date.now();
 			if (cached && (!options?.ttl || now - cached.timestamp < options.ttl)) {
 				return ResultAsync.fromSafePromise(Promise.resolve(cached.result)) as unknown as ResultAsync<T, E>;
@@ -705,7 +793,7 @@ export class Task<T, E> {
 
 			if (pending) return new ResultAsync(pending);
 
-			const p = this.run(ctx).then(res => {
+			const p = this.run(ctx, signal).then(res => {
 				if (res.isOk() || options?.cacheErr) {
 					cached = { result: res, timestamp: Date.now() };
 				}
@@ -733,15 +821,15 @@ export class Task<T, E> {
 	 * const result = await task.execute();
 	 * ```
 	 */
-	cache(key: string, store: TaskCache, options?: { ttl?: number }): Task<T, E> {
-		return new Task(ctx => {
+	cache(key: string, store: TaskCache, options?: { ttl?: number }): Task<T, E, C> {
+		return new Task((ctx, signal) => {
 			return new ResultAsync(
 				Promise.resolve(
 					(async () => {
 						const cached = await store.get<Result<T, E>>(key);
 						if (cached) return cached;
 
-						const res = await this.run(ctx);
+						const res = await this.run(ctx, signal);
 						await store.set(key, res, options?.ttl);
 						return res;
 					})()
@@ -805,4 +893,15 @@ export class Task<T, E> {
 export interface TaskCache {
 	get<T>(key: string): T | undefined | Promise<T | undefined>;
 	set<T>(key: string, value: T, ttl?: number): void | Promise<void>;
+}
+
+export interface CircuitBreakerState {
+	failures: number;
+	lastFailureTime: number;
+	state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+}
+
+export interface ThrottleState {
+	active: number;
+	queue: Array<() => void>;
 }

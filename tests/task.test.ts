@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import { Task } from '../src/task.js';
 import { errAsync, ResultAsync, ok, type Result, okAsync } from '../src/result/index.js';
 
@@ -326,6 +326,109 @@ describe('Task', () => {
 
 			expect(success).toBe(true);
 			expect(failure).toBe(true);
+		});
+	});
+
+	describe('Context typing and AbortSignal', () => {
+		it('chains tasks with different contexts', async () => {
+			type CtxA = { a: number };
+			type CtxB = { b: string };
+			const ta = Task.ask<CtxA>().map(c => c.a);
+			const tb = Task.ask<CtxB>().map(c => c.b);
+
+			const combined = ta.chain(a => tb.map(b => a + Number(b)));
+			// At this point, `combined` requires CtxA & CtxB
+			const result = await combined.provide({ a: 10, b: '20' }).execute();
+			expect(result.unwrap()).toBe(30);
+		});
+
+		it('propagates AbortSignal to the underlying provider', async () => {
+			let aborted = false;
+			const longTask = Task.from<number, string, void>((ctx, signal) => {
+				return new Promise((resolve, reject) => {
+					if (signal) {
+						signal.addEventListener('abort', () => {
+							aborted = true;
+							reject('ABORTED_BY_SIGNAL');
+						});
+					}
+					setTimeout(() => resolve(42), 100);
+				});
+			});
+
+			const controller = new AbortController();
+			const p = longTask.execute(controller.signal);
+			controller.abort('ABORTED_BY_SIGNAL');
+
+			const result = await p;
+			expect(result.isErr()).toBe(true);
+			expect(result.unwrapErr()).toBe('ABORTED_BY_SIGNAL');
+			expect(aborted).toBe(true);
+		});
+
+		it('shares circuit breaker state when passed explicitly', async () => {
+			let calls = 0;
+			const sharedState = { failures: 0, lastFailureTime: 0, state: 'CLOSED' as const };
+
+			const makeTask = () =>
+				new Task(() => {
+					calls++;
+					return errAsync('fail');
+				}).circuitBreaker({ threshold: 2, resetTimeout: 100 }, sharedState);
+
+			const task1 = makeTask();
+			const task2 = makeTask();
+			const task3 = makeTask();
+
+			await task1.execute(); // failure 1
+			await task2.execute(); // failure 2 -> trips global state
+
+			const result = await task3.execute(); // Trips immediately via shared state
+			expect(result.unwrapErr()).toBe('CIRCUIT_OPEN');
+			expect(calls).toBe(2);
+		});
+	});
+	describe('Type Tests', () => {
+		it('chaining contexts produces union error and intersection context types', () => {
+			type CtxA = { a: number };
+			type CtxB = { b: string };
+
+			const tA = Task.ask<CtxA>().mapErr(() => 'ErrA' as const);
+			const tB = Task.ask<CtxB>().mapErr(() => 'ErrB' as const);
+
+			const combined = tA.chain(a => tB.map(b => ({ a, b })));
+
+			expectTypeOf(combined).toEqualTypeOf<Task<{ a: CtxA; b: CtxB }, 'ErrA' | 'ErrB', CtxA & CtxB>>();
+		});
+
+		it('provide strips the context requirement', () => {
+			type Env = { user: string };
+			const required = Task.ask<Env>().mapErr(() => 'SomeErr' as const);
+
+			expectTypeOf(required).toEqualTypeOf<Task<Env, 'SomeErr', Env>>();
+
+			const provided = required.provide({ user: 'foo' });
+			expectTypeOf(provided).toEqualTypeOf<Task<Env, 'SomeErr', void>>();
+		});
+
+		it('Task.all handles variadic tuples and intersect contexts', () => {
+			const t1 = Task.ask<{ a: 1 }>().mapErr(() => 'E1' as const);
+			const t2 = Task.ask<{ b: 2 }>().mapErr(() => 'E2' as const);
+
+			const all = Task.all([t1, t2]);
+
+			expectTypeOf(all).toEqualTypeOf<
+				Task<[{ a: 1 }, { b: 2 }], 'E1' | 'E2', { a: 1 } & { b: 2 }>
+			>();
+		});
+		
+		it('Task.flatten handles generic unnesting', () => {
+			const nested = Task.ask<{ a: 1 }>().mapErr(() => 'E1' as const).map(
+				() => Task.ask<{ b: 2 }>().mapErr(() => 'E2' as const)
+			);
+			
+			const flat = nested.flatten();
+			expectTypeOf(flat).toEqualTypeOf<Task<{ b: 2 }, 'E1' | 'E2', { a: 1 } & { b: 2 }>>();
 		});
 	});
 });

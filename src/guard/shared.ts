@@ -2,6 +2,7 @@ import { ok, err, type Result } from '../result/result.js';
 import { GlobalErrs, type InferErr } from '../tagged-errs.js';
 import { deepEqual, safeStringify } from '../utils.js';
 import type { StandardSchemaV1 } from '../standard-schema.js';
+import type { Schema } from './schema.js';
 import { COERCERS } from './coercion.js';
 import { arbitraryTerminal, generateTerminal } from './generate.js';
 import { AsyncGuard } from './async.js';
@@ -330,19 +331,26 @@ export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unkn
 	 */
 	not: Guard<unknown>;
 	/**
-	 * Combines this guard with another using AND — both must pass.
+	 * Combines this guard with another using AND: both must pass.
 	 * Preserves this guard's helpers since the intersection refines the same base type.
 	 *
 	 * `is.object({ name: is.string }).and(is.object({ age: is.number }))` → `Guard<{ name: string } & { age: number }>`
 	 */
 	and: <U>(other: Guard<U, Record<string, any>>) => Guard<T & U, H>;
 	/**
-	 * Combines this guard with another using OR — either can pass.
+	 * Combines this guard with another using OR: either can pass.
 	 * Drops type-specific helpers since the value could be either type.
 	 *
 	 * `is.string.or(is.number)` → `Guard<string | number>`
 	 */
 	or: <U>(other: Guard<U, Record<string, any>>) => Guard<T | U>;
+	/**
+	 * Combines this guard with another using XOR: exactly one can pass.
+	 * Drops type-specific helpers since the value could be either type.
+	 *
+	 * `is.string.xor(is.number)` → `Guard<string | number>`
+	 */
+	xor: <U>(other: Guard<U, Record<string, any>>) => Guard<T | U>;
 	/**
 	 * Wraps the guard to also accept `null`.
 	 * Drops type-specific helpers since the value may be null.
@@ -539,6 +547,29 @@ export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unkn
 	 * ```
 	 */
 	transformAsync: <U>(fn: (value: T) => Promise<U>) => AsyncGuard<U>;
+	/**
+	 * Converts this guard into a `Schema` with recursive error collection.
+	 *
+	 * Unlike `.parse()` (fail-fast, single error), `schema.parse()` walks the entire
+	 * structure and collects **all** validation failures with full dot-path tracking.
+	 *
+	 * @param name - A label for this schema, used in error paths and messages.
+	 *
+	 * @example
+	 * ```ts
+	 * const UserSchema = is.object({
+	 *   name: is.string.min(1),
+	 *   age: is.number.gt(0),
+	 * }).toSchema('User');
+	 *
+	 * UserSchema.parse({ name: '', age: -1 });
+	 * // Err([
+	 * //   GuardErr { path: ['User', 'name'], ... },
+	 * //   GuardErr { path: ['User', 'age'], ... },
+	 * // ])
+	 * ```
+	 */
+	toSchema: (name: string) => Schema<T>;
 } & H;
 
 //
@@ -1162,6 +1193,19 @@ function cleanSchema(schema: JsonSchemaNode): JsonSchemaNode {
 	return out;
 }
 
+// ---------------------------------------------------------------------------
+// toSchema registration — avoids a runtime circular dep with schema.ts
+// (schema.ts imports runtime values from shared.ts, so shared.ts can't
+// import back; schema.ts registers its implementation here at init time)
+// ---------------------------------------------------------------------------
+
+let _toSchemaFn: ((name: string, guard: Guard<any>) => unknown) | undefined;
+
+/** @internal Called once by schema.ts at module init to register buildSchema. */
+export function _registerToSchema(fn: (name: string, guard: Guard<any>) => unknown): void {
+	_toSchemaFn = fn;
+}
+
 // Shared by all guards
 const universalHelpers: Record<string, any> = {
 	error: transformer((target, msg: string | ((ctx: { meta: GuardMeta; value: unknown }) => string)) => {
@@ -1264,7 +1308,14 @@ const universalHelpers: Record<string, any> = {
 	or: transformer((target, other: Guard<any, Record<string, any>>) => ({
 		fn: (v: unknown): v is any => target(v) || other(v),
 		meta: { name: `${target.meta.name}.or(${other.meta?.name ?? '?'})` },
-		helpers: {}, // drops helpers
+		helpers: {},
+		replaceHelpers: true,
+	})),
+
+	xor: transformer((target, other: Guard<any, Record<string, any>>) => ({
+		fn: (v: unknown): v is any => (target(v) || other(v)) && !(target(v) && other(v)), // one must pass, but not both
+		meta: { name: `${target.meta.name}.xor(${other.meta?.name ?? '?'})` },
+		helpers: {},
 		replaceHelpers: true,
 	})),
 
@@ -1380,6 +1431,15 @@ const universalHelpers: Record<string, any> = {
 	transformAsync: terminal((target: Guard<any>, fn: (v: any) => Promise<any>) =>
 		new AsyncGuard(target, []).transformAsync(fn)
 	),
+
+	toSchema: terminal((target: Guard<any>, name: string) => {
+		if (!_toSchemaFn) {
+			throw new Error(
+				'[ts-chas] Guard.toSchema() is unavailable — import from "ts-chas/guard" rather than an internal module.'
+			);
+		}
+		return _toSchemaFn(name, target);
+	}),
 };
 
 export function getType(v: any): string {

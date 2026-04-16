@@ -1,6 +1,17 @@
 import type { None, Option, OptionAsync, Some } from '../option.js';
 import { GlobalErrs, type TaggedErr } from '../tagged-errs.js';
-import type { CatchTag, CatchTarget, ExtractErrorFromTarget, NonVoid } from '../utils.js';
+import type {
+	CatchTag,
+	CatchTarget,
+	ExtractErrorFromTarget,
+	NonVoid,
+	ResultErrHandlers,
+	ResultPartialErrHandlers,
+	HandlerReturnType,
+	NoExtraKeys,
+	AllowedMatchTagKeys,
+	AllowedMatchTagPartialKeys,
+} from '../utils.js';
 import type { Err, Ok } from './shared.js';
 
 // ==== RESULT TYPE ====
@@ -682,6 +693,51 @@ export interface ResultMethods<T, E> {
 		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => void
 	) => Result<T, E>;
 
+	/**
+	 * Matches on the result value if Ok, or by the error tags if Err.
+	 * Requires exhaustive handlers for all tagged variants in the error union.
+	 * If the union contains non-tagged members, an `err` handler is also required.
+	 *
+	 * Return type is inferred from the **union** of all handler return types.
+	 *
+	 * @param handlers Object mapping `ok` and each error tag to a handler.
+	 * @returns The value returned by whichever handler matched.
+	 *
+	 * @example
+	 * ```ts
+	 * const status = result.matchTag({
+	 *   ok: (val) => 200,
+	 *   NotFound: (e) => 404,
+	 *   Unauthorized: (e) => 401
+	 * }); // 200 | 404 | 401
+	 * ```
+	 */
+	matchTag<H extends { ok: (value: T) => any } & ResultErrHandlers<E>>(
+		handlers: H & NoExtraKeys<H, AllowedMatchTagKeys<E>>
+	): HandlerReturnType<H>;
+
+	/**
+	 * Matches on the result value if Ok, or by specific error tags if Err.
+	 * Allows partial tag matching; unhandled variants fall through to the required `_` wildcard.
+	 *
+	 * Return type is inferred from the **union** of all handler return types.
+	 *
+	 * @param handlers Object mapping `ok`, optional tag handlers, and a required `_` fallback.
+	 * @returns The value returned by whichever handler matched.
+	 *
+	 * @example
+	 * ```ts
+	 * const msg = result.matchTagPartial({
+	 *   ok: (val) => 'ok',
+	 *   NotFound: (e) => 'missing',
+	 *   _: (e) => 'other error'
+	 * });
+	 * ```
+	 */
+	matchTagPartial<H extends { ok: (value: T) => any } & ResultPartialErrHandlers<E>>(
+		handlers: H & NoExtraKeys<H, AllowedMatchTagPartialKeys<E>>
+	): HandlerReturnType<H>;
+
 	[Symbol.iterator](): Generator<Result<T, E>, T, any>;
 	[Symbol.asyncIterator](): AsyncGenerator<Result<T, E>, T, any>;
 
@@ -1081,6 +1137,32 @@ export const ResultMethodsProto = {
 		}
 		return this;
 	},
+	matchTag<T, E, H extends { ok: (value: T) => any } & ResultErrHandlers<E>>(this: Result<T, E>, handlers: H & NoExtraKeys<H, AllowedMatchTagKeys<E>>): HandlerReturnType<H> {
+		if (this.ok) return handlers.ok(this.value);
+		const error = this.error;
+		if (error && typeof error === 'object' && '_tag' in error) {
+			const tag = (error as any)._tag;
+			const handler = (handlers as any)[tag];
+			if (handler) return handler(error as any);
+		}
+		if ('err' in handlers) return (handlers as any).err(error);
+		// Should not be reachable if handlers are exhaustive
+		throw GlobalErrs.ChasErr({
+			message: `Unhandled tag: ${(error as any)?._tag}`,
+			origin: 'Result.matchTag',
+			cause: this,
+		});
+	},
+	matchTagPartial<T, E, H extends { ok: (value: T) => any } & ResultPartialErrHandlers<E>>(this: Result<T, E>, handlers: H & NoExtraKeys<H, AllowedMatchTagPartialKeys<E>>): HandlerReturnType<H> {
+		if (this.ok) return handlers.ok(this.value);
+		const error = this.error;
+		if (error && typeof error === 'object' && '_tag' in error) {
+			const tag = (error as any)._tag;
+			const handler = (handlers as any)[tag];
+			if (handler) return handler(error as any);
+		}
+		return (handlers as any)._(error);
+	},
 	*[Symbol.iterator]<T, E>(this: Result<T, E>): Generator<Result<T, E>, T, T> {
 		return (yield this) as T;
 	},
@@ -1167,22 +1249,6 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	}
 
 	/**
-	 * Creates a `ResultAsync` from an already resolved `Result`.
-	 * This is useful for lifting synchronous `Result` values into the asynchronous context of `ResultAsync`.
-	 * @param result A `Result` to wrap in a `ResultAsync`.
-	 * @returns A `ResultAsync` that resolves to the provided `Result`.
-	 *
-	 * @example
-	 * ```ts
-	 * const res = chas.ResultAsync.fromResult(chas.ok(42));
-	 * const val = await res; // Ok(42)
-	 * ```
-	 */
-	static fromResult<T, E>(result: Result<T, E>): ResultAsync<T, E> {
-		return new ResultAsync<T, E>(Promise.resolve(result));
-	}
-
-	/**
 	 * Creates a `ResultAsync` from a value that may be a `Result`, a `Promise`, or a plain value.
 	 */
 	static from<T, E>(val: () => Result<T, E> | PromiseLike<Result<T, E>>): ResultAsync<T, E>;
@@ -1207,12 +1273,14 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 
 		if (isPromise(resolved)) {
 			return new ResultAsync(
-				(resolved as Promise<any>).then(v => (isResult(v) ? v : ok(v))).catch(e => err(e))
+				(resolved as Promise<any>)
+					.then(v => (isResult(v) ? v : ok(v)))
+					.catch(e => err(onThrow ? onThrow(e) : e))
 			) as ResultAsync<any, any>;
 		}
 
 		if (isResult(resolved)) {
-			return ResultAsync.fromResult(resolved);
+			return new ResultAsync(Promise.resolve(resolved));
 		}
 
 		return new ResultAsync(Promise.resolve(ok(resolved)));
@@ -1408,6 +1476,36 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 			if (res.isSome()) return fns.some(res.value);
 			return fns.none();
 		});
+	}
+
+	/**
+	 * Matches on the resolved result value if Ok, or by the error tags if Err.
+	 * Requires exhaustive handlers for all tagged variants in the error union.
+	 *
+	 * Return type is inferred from the **union** of all handler return types.
+	 *
+	 * @param handlers Object mapping `ok` and each error tag to a handler.
+	 * @returns A promise that resolves to the value returned by whichever handler matched.
+	 */
+	matchTag<H extends { ok: (value: T) => any } & ResultErrHandlers<E>>(
+		handlers: H & NoExtraKeys<H, AllowedMatchTagKeys<E>>
+	): Promise<Awaited<HandlerReturnType<H>>> {
+		return this._promise.then(res => res.matchTag(handlers as any) as any);
+	}
+
+	/**
+	 * Matches on the resolved result value if Ok, or by specific error tags if Err.
+	 * Unhandled tag variants fall through to the required `_` wildcard.
+	 *
+	 * Return type is inferred from the **union** of all handler return types.
+	 *
+	 * @param handlers Object mapping `ok`, optional tag handlers, and a required `_` fallback.
+	 * @returns A promise that resolves to the value returned by whichever handler matched.
+	 */
+	matchTagPartial<H extends { ok: (value: T) => any } & ResultPartialErrHandlers<E>>(
+		handlers: H & NoExtraKeys<H, AllowedMatchTagPartialKeys<E>>
+	): Promise<Awaited<HandlerReturnType<H>>> {
+		return this._promise.then(res => res.matchTagPartial(handlers as any) as any);
 	}
 
 	/**
@@ -1763,7 +1861,7 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 
 // ==== RESULT/RESULTASYNC HELPERS ====
 
-function isResult(val: unknown): val is Result<any, any> {
+export function isResult(val: unknown): val is Result<any, any> {
 	return (
 		val !== null &&
 		typeof val === 'object' &&

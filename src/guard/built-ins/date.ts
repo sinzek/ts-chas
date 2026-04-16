@@ -176,8 +176,12 @@ export const DateGuard: DateGuard = makeGuard(
 	minimum: min.getTime(),
 	maximum: max.getTime(),
 });
-(dateHelpers.future as any)[JSON_SCHEMA] = () => ({ minimum: Date.now() + 1 });
-(dateHelpers.past as any)[JSON_SCHEMA] = () => ({ maximum: Date.now() - 1 });
+// Use a generous margin so generated values are well clear of the current instant.
+// Without it, a value generated at (now + 1ms) is already in the past by the time
+// the guard re-evaluates Date.now() a few milliseconds later.
+const GEN_NOW_MARGIN_MS = 60_000; // 1 minute
+(dateHelpers.future as any)[JSON_SCHEMA] = () => ({ minimum: Date.now() + GEN_NOW_MARGIN_MS });
+(dateHelpers.past as any)[JSON_SCHEMA] = () => ({ maximum: Date.now() - GEN_NOW_MARGIN_MS });
 (dateHelpers.year as any)[JSON_SCHEMA] = (year: number) => ({
 	minimum: new Date(year, 0, 1, 0, 0, 0, 0).getTime(),
 	maximum: new Date(year, 11, 31, 23, 59, 59, 999).getTime(),

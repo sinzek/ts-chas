@@ -1,6 +1,6 @@
 import type { Guard } from '../guard/shared.js';
 import { GlobalErrs } from '../tagged-errs.js';
-import { err, ok, ResultAsync, ResultMethodsProto, type Result } from './result.js';
+import { err, isResult, ok, ResultAsync, ResultMethodsProto, type Result } from './result.js';
 import type { ExtractErrError, ExtractOkValue, UnwrapErr } from './shared.js';
 
 /**
@@ -142,6 +142,8 @@ export const fromSafePromise = <T>(promise: Promise<T>): ResultAsync<T, never> =
  * Creates a `Result` from a synchronous function that may throw.
  * Returns `Ok` with the function's return value, or `Err` if an exception occurred.
  *
+ * For async functions, use `tryCatchAsync`.
+ *
  * @param fn The synchronous function to execute.
  * @param onThrow A function to map the thrown exception to an error type `E`. If not provided, the thrown exception is returned as the error value typed as `unknown`.
  * @returns A `Result` evaluating the function.
@@ -160,6 +162,44 @@ export const tryCatch = <T, E = unknown>(
 	} catch (e) {
 		return err(onThrow?.(e) ?? e) as Result<T, E extends null | undefined ? unknown : E>;
 	}
+};
+
+/**
+ * Creates a `ResultAsync` from an async function that may throw or reject.
+ * Returns `Ok` with the resolved value, or `Err` if the function throws synchronously
+ * or the returned promise rejects.
+ *
+ * For synchronous functions, use `tryCatch`.
+ *
+ * @param fn The async function to execute.
+ * @param onThrow A function to map the thrown exception or rejection to an error type `E`. If not provided, the raw exception is used as the error value (typed as `unknown`).
+ * @returns A `ResultAsync` evaluating the function.
+ *
+ * @example
+ * ```ts
+ * const fetchUser = (id: number) => chas.tryCatchAsync(
+ *   () => fetch(`/users/${id}`).then(r => r.json()),
+ *   e => new NetworkError(String(e)),
+ * );
+ * ```
+ */
+export const tryCatchAsync = <T, E = unknown>(
+	fn: () => Promise<T>,
+	onThrow?: (error: unknown) => E
+): ResultAsync<T, E extends null | undefined ? unknown : E> => {
+	let promise: Promise<T>;
+	try {
+		promise = fn();
+	} catch (e) {
+		return new ResultAsync(Promise.resolve(err(onThrow?.(e) ?? e))) as ResultAsync<
+			T,
+			E extends null | undefined ? unknown : E
+		>;
+	}
+	return new ResultAsync(promise.then(v => ok(v)).catch(e => err(onThrow?.(e) ?? e))) as ResultAsync<
+		T,
+		E extends null | undefined ? unknown : E
+	>;
 };
 
 /**
@@ -446,55 +486,87 @@ export function collectAsync(promises: Iterable<PromiseLike<Result<any, any>>>):
 }
 
 /**
- * Wraps a synchronous function, returning a new function that returns a `Result`
- * instead of throwing.
+ * Wraps a synchronous function, returning a new function that returns a `Result` instead of throwing.
  *
- * @param fn The function to wrap.
- * @param onThrow A function to map thrown exceptions to an error type `E`. If not provided, the thrown exception is returned as the error value typed as `unknown`.
- * @returns A new function returning `Result<T, E>`.
+ * Supports two workflows:
+ * - **Wrap-a-thrower**: pass an existing function that returns a plain value and may throw.
+ *   Provide an optional `onThrow` mapper to type the error.
+ * - **Define-with-Result**: pass a function whose body explicitly returns `ok()`/`err()`.
+ *   Throws from that body are still caught and turned into `err()`.
  *
  * @example
  * ```ts
- * const safeParse = chas.wrap(JSON.parse, e => new Error('Failed to parse'));
- * const res = safeParse('{"a": 1}'); // Ok({ a: 1 })
+ * // Wrap-a-thrower
+ * const safeParse = chas.wrap(JSON.parse, e => new SyntaxError(String(e)));
+ * safeParse('{"a":1}');     // Ok({ a: 1 })
+ * safeParse('bad json');    // Err(SyntaxError)
+ *
+ * // Define-with-Result
+ * const divide = chas.wrap((a: number, b: number) => {
+ *     if (b === 0) return chas.err('division by zero' as const);
+ *     return chas.ok(a / b);
+ * });
+ * divide(10, 2);   // Ok(5)
+ * divide(10, 0);   // Err('division by zero')
  * ```
  */
-export const wrap = <Args extends unknown[], T, E = unknown>(
+export function wrap<Args extends unknown[], T, E>(
+	fn: (...args: Args) => Result<T, E>,
+	onThrow?: (error: unknown) => E
+): (...args: Args) => Result<T, E>;
+export function wrap<Args extends unknown[], T, E = unknown>(
 	fn: (...args: Args) => T,
 	onThrow?: (error: unknown) => E
-): ((...args: Args) => Result<T, E extends null | undefined ? unknown : E>) => {
-	return (...args: Args): Result<T, E extends null | undefined ? unknown : E> => {
+): (...args: Args) => Result<T, E extends null | undefined ? unknown : E>;
+export function wrap(fn: (...args: any[]) => any, onThrow?: (error: unknown) => any) {
+	return (...args: any[]) => {
 		try {
-			return ok(fn(...args));
+			const val = fn(...args);
+			return isResult(val) ? val : ok(val);
 		} catch (e) {
-			return err(onThrow?.(e) ?? e) as Result<T, E extends null | undefined ? unknown : E>;
+			return err(onThrow ? onThrow(e) : e);
 		}
 	};
-};
+}
 
 /**
  * Wraps an asynchronous function, returning a new function that returns a `ResultAsync`
- * instead of rejecting or throwing.
+ * instead of throwing or rejecting.
  *
- * @param fn The async function to wrap.
- * @param onThrow A function to map thrown exceptions or rejections to an error type `E`. If not provided, the thrown exception is returned as the error value typed as `unknown`.
- * @returns A new function returning `ResultAsync<T, E>`.
+ * Supports two workflows:
+ * - **Wrap-a-thrower**: pass an existing async function that returns a plain value and may
+ *   throw or reject. Provide an optional `onThrow` mapper to type the error.
+ * - **Define-with-Result**: pass an async function whose body explicitly returns `ok()`/`err()`.
+ *   Sync throws before the first `await` and async rejections are still caught.
  *
  * @example
  * ```ts
- * const fetchUrl = async (url: string) => { ... }
- * const safeFetch = chas.wrapAsync(fetchUrl, e => String(e));
- * const res = await safeFetch('https://api.example.com'); // Ok(Response) or Err(ErrorString)
+ * // Wrap-a-thrower
+ * const safeFetch = chas.wrapAsync(fetch, e => new NetworkError(String(e)));
+ * await safeFetch('/api/user');  // Ok(Response) or Err(NetworkError)
+ *
+ * // Define-with-Result
+ * const findUser = chas.wrapAsync(async (id: string) => {
+ *     const user = await db.find(id);
+ *     if (!user) return chas.err('NOT_FOUND' as const);
+ *     return chas.ok(user);
+ * });
+ * await findUser('123');  // Ok(User) or Err('NOT_FOUND')
  * ```
  */
-export const wrapAsync = <Args extends unknown[], T, E = unknown>(
-	fn: (...args: Args) => Promise<T>,
+export function wrapAsync<Args extends unknown[], T, E>(
+	fn: (...args: Args) => Result<T, E> | PromiseLike<Result<T, E>>,
 	onThrow?: (error: unknown) => E
-) => {
-	return (...args: Args): ResultAsync<T, E extends null | undefined ? unknown : E> => {
-		return fromPromise(fn(...args), onThrow);
+): (...args: Args) => ResultAsync<T, E>;
+export function wrapAsync<Args extends unknown[], T, E = unknown>(
+	fn: (...args: Args) => T | PromiseLike<T>,
+	onThrow?: (error: unknown) => E
+): (...args: Args) => ResultAsync<T, E extends null | undefined ? unknown : E>;
+export function wrapAsync(fn: (...args: any[]) => any, onThrow?: (error: unknown) => any) {
+	return (...args: any[]): ResultAsync<any, any> => {
+		return ResultAsync.from(() => fn(...args), onThrow) as ResultAsync<any, any>;
 	};
-};
+}
 
 /**
  * Partitions an iterable of `Result`s into an object containing separate arrays of `Ok` values and `Err` errors.
@@ -561,13 +633,23 @@ export const partitionAsync = async <T, E>(
  */
 export function revive<T, E>(parsedJson: Result<T, E> | (() => Result<T, E>)): Result<T, E>;
 export function revive<T, E = never>(parsedJson: { ok: true; value: T } | (() => { ok: true; value: T })): Result<T, E>;
-export function revive<E, T = never>(parsedJson: { ok: false; error: E } | (() => { ok: false; error: E })): Result<T, E>;
-export function revive<T, E>(parsedJson: { ok: boolean; value: T; error: E } | (() => { ok: boolean; value: T; error: E })): Result<T, E>;
-export function revive<T, E = never>(parsedJson: { ok: boolean; value: T } | (() => { ok: boolean; value: T })): Result<T, E>;
-export function revive<E, T = never>(parsedJson: { ok: boolean; error: E } | (() => { ok: boolean; error: E })): Result<T, E>;
+export function revive<E, T = never>(
+	parsedJson: { ok: false; error: E } | (() => { ok: false; error: E })
+): Result<T, E>;
+export function revive<T, E>(
+	parsedJson: { ok: boolean; value: T; error: E } | (() => { ok: boolean; value: T; error: E })
+): Result<T, E>;
+export function revive<T, E = never>(
+	parsedJson: { ok: boolean; value: T } | (() => { ok: boolean; value: T })
+): Result<T, E>;
+export function revive<E, T = never>(
+	parsedJson: { ok: boolean; error: E } | (() => { ok: boolean; error: E })
+): Result<T, E>;
 export function revive<T = undefined, E = never>(parsedJson: { ok: true } | (() => { ok: true })): Result<T, E>;
 export function revive<E = undefined, T = never>(parsedJson: { ok: false } | (() => { ok: false })): Result<T, E>;
-export function revive<T = unknown, E = unknown>(parsedJson: { ok: boolean; value?: T; error?: E } | (() => { ok: boolean; value?: T; error?: E })): Result<T, E>;
+export function revive<T = unknown, E = unknown>(
+	parsedJson: { ok: boolean; value?: T; error?: E } | (() => { ok: boolean; value?: T; error?: E })
+): Result<T, E>;
 export function revive<T = unknown, E = unknown>(parsedJson: unknown | (() => unknown)): Result<T, E>;
 export function revive(parsedJson: any): any {
 	let json = parsedJson;
@@ -603,16 +685,60 @@ export function revive(parsedJson: any): any {
  * const safeData = chas.reviveAsync(await response.json());
  * ```
  */
-export function reviveAsync<T, E>(promise: PromiseLike<Result<T, E>> | (() => PromiseLike<Result<T, E>>) | ResultAsync<T, E> | (() => ResultAsync<T, E>) | PromiseLike<ResultAsync<T, E>> | (() => PromiseLike<ResultAsync<T, E>>)): ResultAsync<T, E>;
-export function reviveAsync<T, E = never>(promise: PromiseLike<{ ok: true; value: T }> | (() => PromiseLike<{ ok: true; value: T }>) | (() => { ok: true; value: T })): ResultAsync<T, E>;
-export function reviveAsync<E, T = never>(promise: PromiseLike<{ ok: false; error: E }> | (() => PromiseLike<{ ok: false; error: E }>) | (() => { ok: false; error: E })): ResultAsync<T, E>;
-export function reviveAsync<T, E>(promise: PromiseLike<{ ok: boolean; value: T; error: E }> | (() => PromiseLike<{ ok: boolean; value: T; error: E }>) | (() => { ok: boolean; value: T; error: E })): ResultAsync<T, E>;
-export function reviveAsync<T, E = never>(promise: PromiseLike<{ ok: boolean; value: T }> | (() => PromiseLike<{ ok: boolean; value: T }>) | (() => { ok: boolean; value: T })): ResultAsync<T, E>;
-export function reviveAsync<E, T = never>(promise: PromiseLike<{ ok: boolean; error: E }> | (() => PromiseLike<{ ok: boolean; error: E }>) | (() => { ok: boolean; error: E })): ResultAsync<T, E>;
-export function reviveAsync<T = undefined, E = never>(promise: PromiseLike<{ ok: true }> | (() => PromiseLike<{ ok: true }>) | (() => { ok: true })): ResultAsync<T, E>;
-export function reviveAsync<E = undefined, T = never>(promise: PromiseLike<{ ok: false }> | (() => PromiseLike<{ ok: false }>) | (() => { ok: false })): ResultAsync<T, E>;
-export function reviveAsync<T = unknown, E = unknown>(promise: PromiseLike<{ ok: boolean; value?: T; error?: E }> | (() => PromiseLike<{ ok: boolean; value?: T; error?: E }>) | (() => { ok: boolean; value?: T; error?: E })): ResultAsync<T, E>;
-export function reviveAsync<T = unknown, E = unknown>(promise: PromiseLike<unknown> | (() => PromiseLike<unknown>) | unknown | (() => unknown)): ResultAsync<T, E>;
+export function reviveAsync<T, E>(
+	promise:
+		| PromiseLike<Result<T, E>>
+		| (() => PromiseLike<Result<T, E>>)
+		| ResultAsync<T, E>
+		| (() => ResultAsync<T, E>)
+		| PromiseLike<ResultAsync<T, E>>
+		| (() => PromiseLike<ResultAsync<T, E>>)
+): ResultAsync<T, E>;
+export function reviveAsync<T, E = never>(
+	promise:
+		| PromiseLike<{ ok: true; value: T }>
+		| (() => PromiseLike<{ ok: true; value: T }>)
+		| (() => { ok: true; value: T })
+): ResultAsync<T, E>;
+export function reviveAsync<E, T = never>(
+	promise:
+		| PromiseLike<{ ok: false; error: E }>
+		| (() => PromiseLike<{ ok: false; error: E }>)
+		| (() => { ok: false; error: E })
+): ResultAsync<T, E>;
+export function reviveAsync<T, E>(
+	promise:
+		| PromiseLike<{ ok: boolean; value: T; error: E }>
+		| (() => PromiseLike<{ ok: boolean; value: T; error: E }>)
+		| (() => { ok: boolean; value: T; error: E })
+): ResultAsync<T, E>;
+export function reviveAsync<T, E = never>(
+	promise:
+		| PromiseLike<{ ok: boolean; value: T }>
+		| (() => PromiseLike<{ ok: boolean; value: T }>)
+		| (() => { ok: boolean; value: T })
+): ResultAsync<T, E>;
+export function reviveAsync<E, T = never>(
+	promise:
+		| PromiseLike<{ ok: boolean; error: E }>
+		| (() => PromiseLike<{ ok: boolean; error: E }>)
+		| (() => { ok: boolean; error: E })
+): ResultAsync<T, E>;
+export function reviveAsync<T = undefined, E = never>(
+	promise: PromiseLike<{ ok: true }> | (() => PromiseLike<{ ok: true }>) | (() => { ok: true })
+): ResultAsync<T, E>;
+export function reviveAsync<E = undefined, T = never>(
+	promise: PromiseLike<{ ok: false }> | (() => PromiseLike<{ ok: false }>) | (() => { ok: false })
+): ResultAsync<T, E>;
+export function reviveAsync<T = unknown, E = unknown>(
+	promise:
+		| PromiseLike<{ ok: boolean; value?: T; error?: E }>
+		| (() => PromiseLike<{ ok: boolean; value?: T; error?: E }>)
+		| (() => { ok: boolean; value?: T; error?: E })
+): ResultAsync<T, E>;
+export function reviveAsync<T = unknown, E = unknown>(
+	promise: PromiseLike<unknown> | (() => PromiseLike<unknown>) | unknown | (() => unknown)
+): ResultAsync<T, E>;
 export function reviveAsync(promise: any): any {
 	const p = typeof promise === 'function' ? promise() : promise;
 
@@ -801,47 +927,6 @@ export const shapeAsync = <TRec extends Record<string, ResultAsync<any, any> | P
 	);
 };
 
-/**
- * Wraps an async function that returns a `Result<T, E>`, a `Promise<T>`, or a plain value `T` in a `ResultAsync<T, E>`.
- * If the function returns a `Result`, it is used as is.
- * If the function returns a plain value or a Promise of a plain value, it is automatically wrapped in `ok()`.
- * If the function throws or the Promise rejects, it is caught and wrapped in `err()`.
- *
- * @param fn Function that returns a `Result`, a `Promise`, or a plain value.
- * @param onThrow Optional function to map thrown exceptions or rejections to an error type `E`.
- * @returns A new function that returns `ResultAsync<T, E>`.
- *
- * @example
- * ```ts
- * // Handling Ok/Err returns
- * const fetchUser = asyncFn(async (id: number) => {
- *     const res = await fetch(`/users/${id}`);
- *     if (!res.ok) return err('NOT_FOUND');
- *     return ok(await res.json());
- * });
- *
- * // Automatically wrapping Promise<T>
- * const getUserName = asyncFn(async (id: number) => {
- *     const user = await db.users.find(id);
- *     return user.name; // Automatically wrapped in ok()
- * });
- *
- * // Catching throws
- * // To reclaim the error type, you'll need to cast w/ onThrow, but at least you know it's safe!
- * const riskyOp = asyncFn(async () => {
- *     if (Math.random() > 0.5) throw new Error('Boom');
- *     return 'Success';
- * }, (error) => (error as Error).message);
- * ```
- */
-export const asyncFn = <Args extends unknown[], T, E = unknown>(
-	fn: (...args: Args) => T | Result<T, E> | PromiseLike<T | Result<T, E>>,
-	onThrow?: (error: unknown) => E
-): ((...args: Args) => ResultAsync<T, E>) => {
-	return (...args: Args): ResultAsync<T, E> => {
-		return ResultAsync.from(() => fn(...args), onThrow) as ResultAsync<T, E>;
-	};
-};
 
 /**
  * Wraps a schema with a parse method in a `Result` that returns the parsed value on success or an error on failure.

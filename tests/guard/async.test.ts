@@ -150,4 +150,92 @@ describe('AsyncGuard', () => {
 		const guard = is.string.email.whereAsync(async () => true);
 		expect(guard.meta.id).toBe('string');
 	});
+
+	// ---- Nested async guards on object guards ---------------------------------
+
+	it('object guard + whereAsync can validate a nested property asynchronously', async () => {
+		const takenEmails = new Set(['taken@example.com']);
+		const guard = is.object({ email: is.string.email }).whereAsync(
+			async obj => !takenEmails.has(obj.email)
+		);
+
+		const ok = await guard.parseAsync({ email: 'free@example.com' });
+		expect(ok.ok).toBe(true);
+
+		const taken = await guard.parseAsync({ email: 'taken@example.com' });
+		expect(taken.ok).toBe(false);
+	});
+
+	it('object guard: sync shape check fails before async predicate runs', async () => {
+		const asyncFn = vi.fn(async () => true);
+		const guard = is.object({ age: is.number.int }).whereAsync(asyncFn);
+
+		const result = await guard.parseAsync({ age: 'not-a-number' });
+		expect(result.ok).toBe(false);
+		expect(asyncFn).not.toHaveBeenCalled();
+	});
+
+	it('object guard + refineAsync can transform a nested property value', async () => {
+		const guard = is.object({ name: is.string }).refineAsync(
+			async obj => ({ ...obj, name: obj.name.trim().toUpperCase() })
+		);
+
+		const result = await guard.parseAsync({ name: '  alice  ' });
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.value).toEqual({ name: 'ALICE' });
+	});
+
+	it('object guard + transformAsync can change the output type entirely', async () => {
+		const guard = is.object({ x: is.number, y: is.number }).transformAsync(
+			async ({ x, y }) => Math.sqrt(x * x + y * y)
+		);
+
+		const result = await guard.parseAsync({ x: 3, y: 4 });
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.value).toBeCloseTo(5);
+	});
+
+	it('chained whereAsync steps both run against the parsed object', async () => {
+		const first = vi.fn(async (obj: { n: number }) => obj.n > 0);
+		const second = vi.fn(async (obj: { n: number }) => obj.n < 100);
+		const guard = is.object({ n: is.number }).whereAsync(first).whereAsync(second);
+
+		const result = await guard.parseAsync({ n: 42 });
+		expect(result.ok).toBe(true);
+		expect(first).toHaveBeenCalledOnce();
+		expect(second).toHaveBeenCalledOnce();
+	});
+
+	it('second whereAsync step is skipped when first fails', async () => {
+		const second = vi.fn(async () => true);
+		const guard = is.object({ n: is.number }).whereAsync(async () => false).whereAsync(second);
+
+		await guard.parseAsync({ n: 42 });
+		expect(second).not.toHaveBeenCalled();
+	});
+
+	it('sync transform on a child guard is applied before the object-level whereAsync runs', async () => {
+		// is.string.trim() applies a sync transform; whereAsync receives the trimmed value
+		const seen: string[] = [];
+		const guard = is.object({ tag: is.string.trim() }).whereAsync(async obj => {
+			seen.push(obj.tag);
+			return true;
+		});
+
+		await guard.parseAsync({ tag: '  hello  ' });
+		expect(seen).toEqual(['hello']);
+	});
+
+	it('deeply nested object guards compose with whereAsync', async () => {
+		const inner = is.object({ zip: is.string.length(5) });
+		const outer = is.object({ address: inner }).whereAsync(
+			async obj => obj.address.zip !== '00000'
+		);
+
+		const valid = await outer.parseAsync({ address: { zip: '12345' } });
+		expect(valid.ok).toBe(true);
+
+		const invalid = await outer.parseAsync({ address: { zip: '00000' } });
+		expect(invalid.ok).toBe(false);
+	});
 });

@@ -187,7 +187,7 @@ describe('is.result().err(innerGuard)', () => {
 
 describe('is.result() universal helpers', () => {
 	it('.where() works on result guards', () => {
-		const okWithValue = is.result().where(r => (r as any).ok === true);
+		const okWithValue = is.result().where(r => r.ok === true);
 		expect(okWithValue(ok(42))).toBe(true);
 		expect(okWithValue(err('x'))).toBe(false);
 	});

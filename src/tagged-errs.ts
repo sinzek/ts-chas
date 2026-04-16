@@ -114,7 +114,28 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
 					fn: () => Promise<Val>,
 					onThrow: (error: unknown) => Parameters<T[K]>
 				) => ResultAsync<Val, Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>>;
+
+		/**
+		 * Synchronously throws the tagged error.
+		 * @param args The arguments to pass to the error factory function.
+		 * @throws The tagged error instance.
+		 */
+		throw: (...args: Parameters<T[K]>) => never;
+
+		$infer: Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr>;
 	};
+} & {
+	/**
+	 * Type-level sentinel — never has a runtime value.
+	 * Use `typeof AppError.$infer` to obtain the full discriminated union of all error variants.
+	 *
+	 * @example
+	 * ```ts
+	 * const AppError = chas.defineErrs({ NotFound: () => ({}), Unauthorized: () => ({}) });
+	 * type AppError = typeof AppError.$infer; // { readonly _tag: 'NotFound' } | { readonly _tag: 'Unauthorized' }
+	 * ```
+	 */
+	$infer: { [K in keyof T]: Prettify<{ readonly _tag: K } & ReturnType<T[K]> & B & TaggedErr> }[keyof T];
 };
 
 /**
@@ -126,11 +147,7 @@ export type ErrorFactories<T extends ErrorDefinitions, B extends Record<string, 
  * type AppError = chas.InferErrs<typeof AppError>; // { readonly _tag: "NotFound" } | { readonly _tag: "Generic", message: string }
  * ```
  */
-export type InferErrs<T extends ErrorFactories<any, any>> = T[keyof T & string] extends infer F
-	? F extends (...args: any[]) => infer R
-		? R
-		: never
-	: never;
+export type InferErrs<T extends { $infer: any }> = T["$infer"];
 
 /**
  * Extracts a single error variant from an error factory.
@@ -146,9 +163,24 @@ export type InferErr<T extends (...args: any[]) => any> = ReturnType<T>;
 /**
  * Extracts a specific error variant from a TaggedErr union.
  * @example
- * type NotFound = chas.ExtractErr<AppErr, 'NotFound'>;
+ * ```ts
+ * const AppError = chas.defineErrs({ NotFound: () => ({}), Generic: (message: string) => ({ message }) });
+ * type AppError = chas.InferErrs<typeof AppError>; // { readonly _tag: "NotFound" } | { readonly _tag: "Generic", message: string }
+ * type NotFound = chas.ExtractErr<AppError, 'NotFound'>; // { readonly _tag: "NotFound" }
+ * ```
  */
 export type ExtractErr<Union extends { _tag: string }, Tag extends Union['_tag']> = Extract<Union, { _tag: Tag }>;
+
+/**
+ * Excludes a specific error variant from a TaggedErr union.
+ * @example
+ * ```ts
+ * const AppError = chas.defineErrs({ NotFound: () => ({}), Generic: (message: string) => ({ message }) });
+ * type AppError = chas.InferErrs<typeof AppError>; // { readonly _tag: "NotFound" } | { readonly _tag: "Generic", message: string }
+ * type AppErrorWithoutNotFound = chas.ExcludeErr<AppError, 'NotFound'>; // { readonly _tag: "Generic", message: string }
+ * ```
+ */
+export type ExcludeErr<Union extends { _tag: string }, Tag extends Union['_tag']> = Exclude<Union, { _tag: Tag }>;
 
 /**
  * Creates tagged error factory functions from a definition object.
@@ -262,10 +294,18 @@ export const defineErrs = <T extends ErrorDefinitions, B extends Record<string, 
 			return fromPromise(fn(), e => factory(...(onThrow ? onThrow(e) : [])));
 		};
 
+		factory.throw = (...args: unknown[]) => {
+			throw factory(...args);
+		};
+
+		factory.$infer = undefined;
+
 		factories[tag] = factory;
 	}
 
-	return factories as unknown as ErrorFactories<T, B>;
+	factories['$infer'] = undefined;
+
+	return factories as ErrorFactories<T, B>;
 };
 
 /**
