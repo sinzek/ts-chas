@@ -803,6 +803,8 @@ describe('guard.toSchema()', () => {
 	it('creates a schema with the given name', () => {
 		const schema = is.string.toSchema('Email');
 		expect(schema.meta.name).toBe('Email');
+
+		const example = is.object();
 	});
 
 	it('parse() returns Ok for valid values', () => {

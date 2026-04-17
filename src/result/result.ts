@@ -556,7 +556,7 @@ export interface ResultMethods<T, E> {
 	 * chas.ok(5).tap(v => console.log('Value:', v)); // logs 5
 	 * ```
 	 */
-	readonly tap: (f: (value: T) => void) => this;
+	readonly tap: (f: (value: T) => void) => Result<T, E>;
 
 	/**
 	 * Calls the provided closure with the `Err` value if the result is `Err`, otherwise does nothing.
@@ -570,7 +570,7 @@ export interface ResultMethods<T, E> {
 	 * chas.err('error').tapErr(e => console.error('Failed:', e));
 	 * ```
 	 */
-	readonly tapErr: (f: (error: E) => void) => this;
+	readonly tapErr: (f: (error: E) => void) => Result<T, E>;
 
 	/**
 	 * Calls the provided closure with the `Ok` value asynchronously if the result is `Ok`.
@@ -753,7 +753,7 @@ export interface ResultMethods<T, E> {
 	 * chas.err('e').log('my error'); // logs 'my error [Err]: e'
 	 * ```
 	 */
-	log(label?: string): this;
+	log(label?: string): Result<T, E>;
 
 	/**
 	 * Alias for `isOk()` and `value != undefined`
@@ -1137,7 +1137,10 @@ export const ResultMethodsProto = {
 		}
 		return this;
 	},
-	matchTag<T, E, H extends { ok: (value: T) => any } & ResultErrHandlers<E>>(this: Result<T, E>, handlers: H & NoExtraKeys<H, AllowedMatchTagKeys<E>>): HandlerReturnType<H> {
+	matchTag<T, E, H extends { ok: (value: T) => any } & ResultErrHandlers<E>>(
+		this: Result<T, E>,
+		handlers: H & NoExtraKeys<H, AllowedMatchTagKeys<E>>
+	): HandlerReturnType<H> {
 		if (this.ok) return handlers.ok(this.value);
 		const error = this.error;
 		if (error && typeof error === 'object' && '_tag' in error) {
@@ -1153,7 +1156,10 @@ export const ResultMethodsProto = {
 			cause: this,
 		});
 	},
-	matchTagPartial<T, E, H extends { ok: (value: T) => any } & ResultPartialErrHandlers<E>>(this: Result<T, E>, handlers: H & NoExtraKeys<H, AllowedMatchTagPartialKeys<E>>): HandlerReturnType<H> {
+	matchTagPartial<T, E, H extends { ok: (value: T) => any } & ResultPartialErrHandlers<E>>(
+		this: Result<T, E>,
+		handlers: H & NoExtraKeys<H, AllowedMatchTagPartialKeys<E>>
+	): HandlerReturnType<H> {
 		if (this.ok) return handlers.ok(this.value);
 		const error = this.error;
 		if (error && typeof error === 'object' && '_tag' in error) {
