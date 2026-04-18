@@ -410,7 +410,15 @@ export function raceAsync<T extends readonly PromiseLike<Result<any, any>>[] | [
 >;
 export function raceAsync<T, E>(promises: Iterable<PromiseLike<Result<T, E>>>): ResultAsync<T, E>;
 export function raceAsync(promises: Iterable<PromiseLike<Result<any, any>>>): ResultAsync<any, any> {
-	return new ResultAsync(Promise.race(promises));
+	const arr = Array.from(promises);
+	if (arr.length === 0) {
+		throw GlobalErrs.ChasErr({
+			message: 'chas.raceAsync was called with an empty iterable',
+			origin: 'chas.raceAsync',
+			cause: promises,
+		});
+	}
+	return new ResultAsync(Promise.race(arr));
 }
 
 /**

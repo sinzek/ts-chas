@@ -219,15 +219,15 @@ describe('chas', () => {
 			expect(errValue).toBe(0);
 		});
 
-		it('asynctap', async () => {
+		it('asyncTap', async () => {
 			let value = 0;
-			await chas.ok(5).asynctap(async v => {
+			await chas.ok(5).asyncTap(async v => {
 				value = v;
 			});
 			expect(value).toBe(5);
 
 			let errValue = 0;
-			await chas.err('error').asynctap(async v => {
+			await chas.err('error').asyncTap(async v => {
 				errValue = v as unknown as number; // just cast or ignore it for none branch
 			});
 			expect(errValue).toBe(0);
@@ -263,15 +263,15 @@ describe('chas', () => {
 			expect(example2).toBe('not found!');
 		});
 
-		it('asynctapErr', async () => {
+		it('asyncTapErr', async () => {
 			let value = '';
-			await chas.err('error').asynctapErr(async e => {
+			await chas.err('error').asyncTapErr(async e => {
 				value = e;
 			});
 			expect(value).toBe('error');
 
 			let okValue = '';
-			await chas.ok(5).asynctapErr(async e => {
+			await chas.ok(5).asyncTapErr(async e => {
 				okValue = e as unknown as string;
 			});
 			expect(okValue).toBe('');

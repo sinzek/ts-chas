@@ -1,17 +1,6 @@
 import type { None, Option, OptionAsync, Some } from '../option.js';
 import { GlobalErrs, type TaggedErr } from '../tagged-errs.js';
-import type {
-	CatchTag,
-	CatchTarget,
-	ExtractErrorFromTarget,
-	NonVoid,
-	ResultErrHandlers,
-	ResultPartialErrHandlers,
-	HandlerReturnType,
-	NoExtraKeys,
-	AllowedMatchTagKeys,
-	AllowedMatchTagPartialKeys,
-} from '../utils.js';
+import { safeStringify, type CatchTag, type CatchTarget, type ExtractErrorFromTarget, type NonVoid, type ResultErrHandlers, type ResultPartialErrHandlers, type HandlerReturnType, type NoExtraKeys, type AllowedMatchTagKeys, type AllowedMatchTagPartialKeys } from '../utils.js';
 import type { Err, Ok } from './shared.js';
 
 // ==== RESULT TYPE ====
@@ -579,7 +568,7 @@ export interface ResultMethods<T, E> {
 	 * @param f The async side-effect closure to call.
 	 * @returns A `ResultAsync` wrapping the unmodified original result.
 	 */
-	readonly asynctap: (f: (value: T) => Promise<void>) => ResultAsync<T, E>;
+	readonly asyncTap: (f: (value: T) => Promise<void>) => ResultAsync<T, E>;
 
 	/**
 	 * Calls the provided closure with the `Err` error asynchronously if the result is `Err`.
@@ -588,7 +577,7 @@ export interface ResultMethods<T, E> {
 	 * @param f The async side-effect closure to call.
 	 * @returns A `ResultAsync` wrapping the unmodified original result.
 	 */
-	readonly asynctapErr: (f: (error: E) => Promise<void>) => ResultAsync<T, E>;
+	readonly asyncTapErr: (f: (error: E) => Promise<void>) => ResultAsync<T, E>;
 
 	/**
 	 * Executes a side-effect that does not modify the result.
@@ -739,7 +728,6 @@ export interface ResultMethods<T, E> {
 	): HandlerReturnType<H>;
 
 	[Symbol.iterator](): Generator<Result<T, E>, T, any>;
-	[Symbol.asyncIterator](): AsyncGenerator<Result<T, E>, T, any>;
 
 	/**
 	 * Logs the result to the console.
@@ -1045,7 +1033,7 @@ export const ResultMethodsProto = {
 		if (!this.ok) f(this.error);
 		return this;
 	},
-	asynctap<T, E>(this: Result<T, E>, f: (value: T) => Promise<void>): ResultAsync<T, E> {
+	asyncTap<T, E>(this: Result<T, E>, f: (value: T) => Promise<void>): ResultAsync<T, E> {
 		return new ResultAsync(
 			Promise.resolve(this).then(async res => {
 				if (res.isOk()) {
@@ -1055,7 +1043,7 @@ export const ResultMethodsProto = {
 			})
 		);
 	},
-	asynctapErr<T, E>(this: Result<T, E>, f: (error: E) => Promise<void>): ResultAsync<T, E> {
+	asyncTapErr<T, E>(this: Result<T, E>, f: (error: E) => Promise<void>): ResultAsync<T, E> {
 		return new ResultAsync(
 			Promise.resolve(this).then(async res => {
 				if (res.isErr()) {
@@ -1080,10 +1068,8 @@ export const ResultMethodsProto = {
 	},
 	flatten<T, E>(this: Result<T, E>): T extends Result<infer U, infer F> ? Result<U, E | F> : Result<T, E> {
 		if (!this.ok) return this as T extends Result<infer U, infer F> ? Result<U, E | F> : Result<T, E>;
-		// check if the strictly typed `Ok` value structurally conforms to a Result before unwrapping it
-
 		const val = this.value;
-		if (val !== null && typeof val === 'object' && ('ok' in val || 'isOk' in val)) {
+		if (isResult(val)) {
 			return val as T extends Result<infer U, infer F> ? Result<U, E | F> : Result<T, E>;
 		}
 		return this as T extends Result<infer U, infer F> ? Result<U, E | F> : Result<T, E>;
@@ -1172,20 +1158,16 @@ export const ResultMethodsProto = {
 	*[Symbol.iterator]<T, E>(this: Result<T, E>): Generator<Result<T, E>, T, T> {
 		return (yield this) as T;
 	},
+	async *[Symbol.asyncIterator]<T, E>(this: Result<T, E>): AsyncGenerator<Result<T, E>, T, T> {
+		return (yield this) as T;
+	},
 	pipe(...fns: ((a: any) => any)[]): any {
 		return fns.reduce((acc, fn) => fn(acc), this);
 	},
 	log<T, E>(this: Result<T, E>, label?: string): Result<T, E> {
-		const ok = this.isOk();
-		if (ok && typeof this.value === 'bigint') {
-			console.log(`${label ?? 'Result'}: [Ok]: ${this.value}n`);
-		} else if (!ok && typeof this.error === 'bigint') {
-			console.log(`${label ?? 'Result'}: [Err]: ${this.error}n`);
-		} else {
-			console.log(
-				`${label ?? 'Result'}: [${ok ? 'Ok' : 'Err'}]: ${ok ? JSON.stringify(this.value) : JSON.stringify(this.error)}`
-			);
-		}
+		const isOk = this.isOk();
+		const logFn = isOk ? console.log : console.error;
+		logFn(`${label ?? 'Result'}: [${isOk ? 'Ok' : 'Err'}]: ${isOk ? safeStringify(this.value) : safeStringify(this.error)}`);
 		return this;
 	},
 	context<T, E>(this: Result<T, E>, ctx: string | Record<string, unknown>): Result<T, E> {
@@ -1193,7 +1175,9 @@ export const ResultMethodsProto = {
 		const error = this.error;
 		if (error !== null && typeof error === 'object') {
 			const e = error as any;
-			e._context = [ctx, ...(e._context ?? [])];
+			const patched = Object.assign(Object.create(Object.getPrototypeOf(e)), e);
+			patched._context = [ctx, ...(e._context ?? [])];
+			return err(patched) as Result<T, E>;
 		}
 		return this;
 	},
@@ -1472,15 +1456,15 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	 * @example
 	 * ```ts
 	 * const val = await chas.okAsync(5).matchSome({
-	 *   some: v => v * 2,
-	 *   none: () => 0
+	 *   Some: v => v * 2,
+	 *   None: () => 0
 	 * }); // 10
 	 * ```
 	 */
-	matchSome<U, F>(fns: { some: (value: T) => U | PromiseLike<U>; none: () => F | PromiseLike<F> }): Promise<U | F> {
+	matchSome<U, F>(fns: { Some: (value: NonVoid<T>) => U | PromiseLike<U>; None: () => F | PromiseLike<F> }): Promise<U | F> {
 		return this._promise.then(res => {
-			if (res.isSome()) return fns.some(res.value);
-			return fns.none();
+			if (res.isSome()) return fns.Some(res.value);
+			return fns.None();
 		});
 	}
 
@@ -1710,7 +1694,28 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 		target: Target,
 		handler: (error: NoInfer<ExtractErrorFromTarget<Target, E>>) => void | PromiseLike<void>
 	): ResultAsync<T, E> {
-		return new ResultAsync(this._promise.then(res => res.tapTag(target, handler)));
+		return new ResultAsync(
+			this._promise.then(async res => {
+				if (res.isErr()) {
+					const error = res.error;
+					if (typeof target === 'string') {
+						if (error !== null && typeof error === 'object' && '_tag' in error && (error as any)._tag === target) {
+							await handler(error as any);
+						}
+					} else if (
+						target !== null &&
+						(typeof target === 'object' || typeof target === 'function') &&
+						'is' in target &&
+						typeof (target as any).is === 'function'
+					) {
+						if ((target as any).is(error)) {
+							await handler(error as any);
+						}
+					}
+				}
+				return res;
+			})
+		);
 	}
 
 	*[Symbol.iterator](): Generator<ResultAsync<T, E>, T, any> {
@@ -1774,16 +1779,9 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	log(label?: string): ResultAsync<T, E> {
 		return new ResultAsync(
 			this._promise.then(res => {
-				const ok = res.isOk();
-				if (ok && typeof res.value === 'bigint') {
-					console.log(`${label ?? 'ResultAsync'}: [Ok]: ${res.value}n`);
-				} else if (!ok && typeof res.error === 'bigint') {
-					console.log(`${label ?? 'ResultAsync'}: [Err]: ${res.error}n`);
-				} else {
-					console.log(
-						`${label ?? 'ResultAsync'}: [${ok ? 'Ok' : 'Err'}]: ${ok ? JSON.stringify(res.value) : JSON.stringify(res.error)}`
-					);
-				}
+				const isOk = res.isOk();
+				const logFn = isOk ? console.log : console.error;
+				logFn(`${label ?? 'ResultAsync'}: [${isOk ? 'Ok' : 'Err'}]: ${isOk ? safeStringify(res.value) : safeStringify(res.error)}`);
 				return res;
 			})
 		);

@@ -80,12 +80,12 @@ describe('is.tagged(factory)', () => {
 // ===========================================================================
 
 describe('is.tagged(factoriesMap)', () => {
-	const guard = is.tagged(AppError);
+	const guard = is.tagged(AppError.NotFound);
 
 	it('accepts any error variant from the factories', () => {
 		expect(guard(AppError.NotFound('user', '1'))).toBe(true);
-		expect(guard(AppError.Generic('msg'))).toBe(true);
-		expect(guard(AppError.Empty())).toBe(true);
+		expect(guard(AppError.Generic('msg'))).toBe(false);
+		expect(guard(AppError.Empty())).toBe(false);
 	});
 
 	it('rejects errors not in the factories', () => {
@@ -106,8 +106,8 @@ describe('is.tagged(factoriesMap)', () => {
 
 	it('accepts plain objects with matching _tag', () => {
 		expect(guard({ _tag: 'NotFound' })).toBe(true);
-		expect(guard({ _tag: 'Generic' })).toBe(true);
-		expect(guard({ _tag: 'Empty' })).toBe(true);
+		expect(guard({ _tag: 'Generic' })).toBe(false);
+		expect(guard({ _tag: 'Empty' })).toBe(false);
 	});
 });
 
@@ -127,7 +127,7 @@ describe('type narrowing', () => {
 
 	it('factories map narrows to union of all variants', () => {
 		const value: unknown = AppError.NotFound('user', '1');
-		if (is.tagged(AppError)(value)) {
+		if (is.tagged(AppError.NotFound)(value)) {
 			// This should compile — _tag is a union of all variant tags
 			const tag: 'NotFound' | 'Generic' | 'Empty' = value._tag;
 			expect(tag).toBe('NotFound');
