@@ -2,7 +2,7 @@
   "name": "ts-chas",
   "repository": "github:sinzek/chas",
   "homepage": "https://docs.cbrock.dev",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "type": "module",
   "description": "A functional programming and utility library for TypeScript that provides tools for explicit error handling, runtime validation, and asynchronous operations.",
   "keywords": [
