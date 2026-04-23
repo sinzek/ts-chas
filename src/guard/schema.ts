@@ -48,7 +48,9 @@ import {
 	evaluateFallback,
 	evaluateError,
 	_registerToSchema,
+	getType,
 } from './shared.js';
+import { generateTerminal } from './generate.js';
 
 /**
  * Extracts the validated output type from a schema, guard, or guard record.
@@ -97,10 +99,10 @@ export interface Schema<T> {
 	parse(value: unknown): Result<T, GuardErr[]>;
 
 	/**
-	 * Validates and returns the typed value, or throws an `AggregateGuardError`
+	 * Validates and returns the typed value, or throws an `AggregateGuardErr`
 	 * containing ALL collected `GuardErr`s.
 	 *
-	 * @throws {AggregateGuardError} If validation fails (contains `.errors: GuardErr[]`).
+	 * @throws {AggregateGuardErr} If validation fails (contains `.errors: GuardErr[]`).
 	 */
 	assert(value: unknown): T;
 
@@ -108,6 +110,23 @@ export interface Schema<T> {
 	 * Simple boolean type guard, delegates to the underlying guard.
 	 */
 	is(value: unknown): value is T;
+
+	/**
+	 * Generates `n` valid values that satisfy this schema (default: 1 → returns a single value).
+	 *
+	 * Requires `fast-check` to be installed (`npm install fast-check`).
+	 * Generated values are guaranteed to pass the schema's predicate.
+	 *
+	 * @example
+	 * ```ts
+	 * await schemas.User.generate()          // { name: 'John', age: 30 }
+	 * await schemas.User.generate(5)  // [{ name: 'John', age: 30 }, { name: 'Jane', age: 25 }, ...]
+	 * ```
+	 */
+	generate: {
+		(): Promise<T>;
+		(n: number): Promise<T[]>;
+	};
 
 	/**
 	 * The underlying guard function for this schema.
@@ -132,7 +151,7 @@ export interface Schema<T> {
 }
 
 // ---------------------------------------------------------------------------
-// AggregateGuardError — thrown by schema.assert() with all errors
+// AggregateGuardErr — thrown by schema.assert() with all errors
 // ---------------------------------------------------------------------------
 
 /**
@@ -144,14 +163,14 @@ export interface Schema<T> {
  * try {
  *   schemas.User.assert(invalidData);
  * } catch (e) {
- *   if (e instanceof AggregateGuardError) {
+ *   if (e instanceof AggregateGuardErr) {
  *     console.log(e.errors); // GuardErr[]
  *     console.log(e.format()); // { 'name': ['...'], 'address.zip': ['...'] }
  *   }
  * }
  * ```
  */
-export class AggregateGuardError extends Error {
+export class AggregateGuardErr extends Error {
 	readonly errors: GuardErr[];
 	readonly schemaName: string;
 
@@ -163,7 +182,7 @@ export class AggregateGuardError extends Error {
 			.join('\n');
 		const overflow = count > 3 ? `\n  ... and ${count - 3} more` : '';
 		super(`${schemaName}: ${count} validation error${count === 1 ? '' : 's'}\n${summary}${overflow}`);
-		this.name = 'AggregateGuardError';
+		this.name = 'AggregateGuardErr';
 		this.errors = errors;
 		this.schemaName = schemaName;
 	}
@@ -242,15 +261,6 @@ export function flattenErrors(errors: GuardErr[]): { path: string; message: stri
 // ---------------------------------------------------------------------------
 // Deep recursive validation — the core of schema parsing
 // ---------------------------------------------------------------------------
-
-function getType(v: unknown): string {
-	if (v === null) return 'null';
-	if (Array.isArray(v)) return 'array';
-	if (v instanceof Date) return 'date';
-	if (v instanceof RegExp) return 'regexp';
-	if (v instanceof URL) return 'url';
-	return typeof v;
-}
 
 function buildErrMsg(meta: GuardMeta, v: unknown): string {
 	const actual = getType(v);
@@ -510,7 +520,7 @@ export function defineSchemas<S extends Record<string, SchemaInput>>(
 	readonly [K in keyof S]: Schema<InferInput<S[K]>>;
 } {
 	const compiled = Object.entries(schemas).map(([name, input]) => {
-		const guard = resolveGuard(input);
+		const guard = resolveGuard(name, input);
 		const schema = buildSchema(name, guard);
 		return [name, schema] as const;
 	});
@@ -532,8 +542,8 @@ export function defineSchemas<S extends Record<string, SchemaInput>>(
  * ```
  */
 export function defineSchema<T extends SchemaInput>(name: string, input: T): Schema<InferInput<T>> {
-	const guard = resolveGuard(input);
-	return buildSchema(name, guard) as Schema<InferInput<T>>;
+	const guard = resolveGuard(name, input);
+	return buildSchema(name, guard);
 }
 
 // ---------------------------------------------------------------------------
@@ -551,7 +561,7 @@ function isGuard(v: unknown): v is Guard<any> {
  * If the input is already a Guard, return it.
  * If it's a plain record, recursively resolve nested records into object guards.
  */
-function resolveGuard(input: SchemaInput | SchemaInputValue): Guard<any> {
+function resolveGuard(schemaName: string, input: SchemaInput | SchemaInputValue): Guard<any> {
 	if (isGuard(input)) {
 		return input;
 	}
@@ -559,7 +569,7 @@ function resolveGuard(input: SchemaInput | SchemaInputValue): Guard<any> {
 	const record = input as Record<string, SchemaInputValue>;
 	const shape: Record<string, Guard<any>> = {};
 	for (const [key, value] of Object.entries(record)) {
-		shape[key] = resolveGuard(value);
+		shape[key] = resolveGuard(schemaName, value);
 	}
 
 	const names = Object.keys(shape)
@@ -582,7 +592,7 @@ function resolveGuard(input: SchemaInput | SchemaInputValue): Guard<any> {
 				id: 'object',
 				shape,
 				path: [] as string[],
-				schema: undefined,
+				schema: schemaName,
 				error: undefined,
 			} as GuardMeta,
 		}
@@ -609,11 +619,15 @@ function buildSchema<T>(name: string, guard: Guard<T, any>): Schema<T> {
 		assert(value: unknown): T {
 			const result = schema.parse(value);
 			if (result.isOk()) return result.value;
-			throw new AggregateGuardError(name, result.error);
+			throw new AggregateGuardErr(name, result.error);
 		},
 
 		is(value: unknown): value is T {
 			return guard(value);
+		},
+
+		generate(n?: number) {
+			return generateTerminal(guard, n);
 		},
 
 		guard,

@@ -1,5 +1,14 @@
-import type { Prettify } from '../../utils.js';
-import { factory, transformer, type Guard, type InferGuard, property, JSON_SCHEMA } from '../shared.js';
+import type { DeepReadonly, Prettify } from '../../utils.js';
+import {
+	factory,
+	transformer,
+	type Guard,
+	type InferGuard,
+	property,
+	JSON_SCHEMA,
+	type GuardMeta,
+	hasForbiddenKey,
+} from '../shared.js';
 import { type EnumHelpers, EnumGuardFactory } from '../misc/enum.js';
 
 export type ObjectHelpers<T> = {
@@ -124,16 +133,74 @@ export type ObjectHelpers<T> = {
 	 *
 	 * Note that further refinements will throw runtime errors.
 	 */
-	readonly: Guard<Readonly<T>, ObjectHelpers<Readonly<T>>>;
+	readonly: Guard<DeepReadonly<T>, ObjectHelpers<DeepReadonly<T>>>;
+	/**
+	 * Opts out of the default rejection of keys that can pollute an object's
+	 * prototype chain (`__proto__`, `constructor`, `prototype`).
+	 *
+	 * By default, object and record guards reject input whose own keys include
+	 * any of these names, so validated values are safe to pass to downstream
+	 * code that assigns by computed key (e.g. `target[k] = value`). Use this
+	 * escape hatch when you genuinely need to accept such keys.
+	 *
+	 * **Ordering matters:** chain `.allowProtoKeys` immediately after
+	 * `is.object(...)` / `is.record(...)`, before any helper that re-validates
+	 * the shape (`.partial`, `.pick`, `.omit`, `.extend`, `.required`). Those
+	 * helpers honor the flag only if it is already set on the parent meta.
+	 *
+	 * @example
+	 * ```ts
+	 * const safe = is.object({ a: is.string });
+	 * safe({ a: 'x', __proto__: { polluted: true } }); // false — rejected
+	 *
+	 * const lax = is.object({ a: is.string }).allowProtoKeys;
+	 * lax({ a: 'x', __proto__: { polluted: true } }); // true
+	 * ```
+	 */
+	allowProtoKeys: Guard<T, ObjectHelpers<T>>;
 };
+
+/**
+ * @internal Returns `false` if `obj` has forbidden keys and the current meta
+ * has not opted out via `.allowProtoKeys`. Returns `true` otherwise.
+ *
+ * Helpers should short-circuit their predicate with this before doing any
+ * further validation, and must propagate `meta.allowProtoKeys` forward so
+ * downstream chain steps honor the opt-out.
+ */
+export function checkProtoKeys(meta: GuardMeta, obj: object): boolean {
+	if (meta['allowProtoKeys'] === true) return true;
+	return !hasForbiddenKey(obj);
+}
+
+/**
+ * @internal Reads the current object's extra-key policy from meta.
+ * - `strict: true` from a prior `.strict` call rejects unknown keys.
+ * - `catchall: Guard<any>` from a prior `.catchall(g)` requires unknown keys to match g.
+ * - Neither set means "allow any extra keys" (the default).
+ */
+function checkExtraKeys(meta: GuardMeta, obj: Record<string, any>, schema: Record<string, Guard<any>>): boolean {
+	const isStrict = meta['strict'] === true;
+	const catchall = meta['catchall'] as Guard<any> | undefined;
+	if (!isStrict && !catchall) return true;
+	const schemaKeys = new Set(Object.keys(schema));
+	for (const k of Object.keys(obj)) {
+		if (schemaKeys.has(k)) continue;
+		if (isStrict) return false;
+		if (catchall && !catchall(obj[k])) return false;
+	}
+	return true;
+}
 
 export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 	partial: transformer<any, any, string[], ObjectHelpers<any>>((target, ...partialKeys) => {
 		const schema = target.meta.shape;
+		const parentMeta = target.meta;
 		// No keys specified = all keys are optional; keys specified = only those are optional
 		const isPartialKey = partialKeys.length > 0 ? (key: string) => partialKeys.includes(key) : () => true;
 		const nextFn = (v: unknown): v is any => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+			if (!checkProtoKeys(parentMeta, v)) return false;
 			if (!schema) return true;
 			const obj = v as any;
 			for (const key of Object.keys(schema)) {
@@ -144,22 +211,29 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 					if (value === undefined || !(schema as any)[key](value)) return false;
 				}
 			}
-			return true;
+			// Preserve strict/catchall policy from the parent so `.strict.partial` still
+			// rejects unknown keys (and `.catchall(g).partial` still validates them).
+			return checkExtraKeys(parentMeta, obj, schema as Record<string, Guard<any>>);
 		};
 		return {
 			fn: nextFn,
 			meta: {
 				name: `${target.meta.name}.partial(${partialKeys.length > 0 ? partialKeys.join(', ') : ''})`,
 				shape: schema || {},
+				...(parentMeta['strict'] === true && { strict: true }),
+				...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
+				...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
 			},
 		};
 	}),
 	required: transformer<any, any, string[], ObjectHelpers<any>>((target, ...requiredKeys) => {
 		const schema = target.meta.shape;
+		const parentMeta = target.meta;
 		// No keys specified = all keys are required; keys specified = only those are required
 		const isRequiredKey = requiredKeys.length > 0 ? (key: string) => requiredKeys.includes(key) : () => true;
 		const nextFn = (v: unknown): v is any => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+			if (!checkProtoKeys(parentMeta, v)) return false;
 			if (!schema) return true;
 			const obj = v as any;
 			for (const key of Object.keys(schema)) {
@@ -170,29 +244,46 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 					if (value !== undefined && !(schema as any)[key](value)) return false;
 				}
 			}
-			return true;
+			return checkExtraKeys(parentMeta, obj, schema as Record<string, Guard<any>>);
 		};
 		return {
 			fn: nextFn,
 			meta: {
 				name: `${target.meta.name}.required(${requiredKeys.length > 0 ? requiredKeys.join(', ') : ''})`,
 				shape: schema || {},
+				...(parentMeta['strict'] === true && { strict: true }),
+				...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
+				...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
 			},
 		};
 	}),
 	pick: transformer<any, any, [string[]], ObjectHelpers<any>>((target, keys: string[]) => {
 		const schema = target.meta.shape;
+		const parentMeta = target.meta;
 		const nextSchema = schema ? Object.fromEntries(Object.entries(schema).filter(([k]) => keys.includes(k))) : {};
 		const transform = (v: any) => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return v;
+			// Use defineProperty so the __proto__ setter is never triggered, even if
+			// a user explicitly picks `__proto__` via .allowProtoKeys.pick(['__proto__']).
 			const picked: any = {};
 			for (const k of keys) {
-				if (k in v) picked[k] = v[k];
+				if (Object.hasOwn(v, k)) {
+					Object.defineProperty(picked, k, {
+						value: v[k],
+						writable: true,
+						enumerable: true,
+						configurable: true,
+					});
+				}
 			}
 			return picked;
 		};
 		const nextFn = (v: unknown): v is any => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+			if (!checkProtoKeys(parentMeta, v)) return false;
+			// Enforce extra-key policy against the ORIGINAL value, using the picked schema
+			// as the allowed-key set, so `.strict.pick(['a'])` rejects `{a:1, b:2}`.
+			if (!checkExtraKeys(parentMeta, v as any, nextSchema as Record<string, Guard<any>>)) return false;
 			const transformed = transform(v);
 			const schemaObj = nextSchema as Record<string, Guard<any>>;
 			for (const key of Object.keys(schemaObj)) {
@@ -202,12 +293,19 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		};
 		return {
 			fn: nextFn,
-			meta: { name: `${target.meta.name}.pick(${keys.join(', ')})`, shape: nextSchema },
+			meta: {
+				name: `${target.meta.name}.pick(${keys.join(', ')})`,
+				shape: nextSchema,
+				...(parentMeta['strict'] === true && { strict: true }),
+				...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
+				...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
+			},
 			transform,
 		};
 	}) as any,
 	omit: transformer<any, any, [string[]], ObjectHelpers<any>>((target, keys: string[]) => {
 		const schema = target.meta.shape;
+		const parentMeta = target.meta;
 		const nextSchema = schema ? Object.fromEntries(Object.entries(schema).filter(([k]) => !keys.includes(k))) : {};
 		const transform = (v: any) => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return v;
@@ -219,7 +317,10 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		};
 		const nextFn = (v: unknown): v is any => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+			if (!checkProtoKeys(parentMeta, v)) return false;
+			// Enforce extra-key policy against the remaining (omitted) view, so .strict is preserved.
 			const transformed = transform(v);
+			if (!checkExtraKeys(parentMeta, transformed, nextSchema as Record<string, Guard<any>>)) return false;
 			const schemaObj = nextSchema as Record<string, Guard<any>>;
 			for (const key of Object.keys(schemaObj)) {
 				if (!schemaObj[key]!(transformed[key])) return false;
@@ -228,31 +329,49 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		};
 		return {
 			fn: nextFn,
-			meta: { name: `${target.meta.name}.omit(${keys.join(', ')})`, shape: nextSchema },
+			meta: {
+				name: `${target.meta.name}.omit(${keys.join(', ')})`,
+				shape: nextSchema,
+				...(parentMeta['strict'] === true && { strict: true }),
+				...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
+				...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
+			},
 			transform,
 		};
 	}) as any,
 	extend: transformer<any, any, [Record<string, Guard<any>>], ObjectHelpers<any>>(
 		(target, extension: Record<string, Guard<any>>) => {
 			const schema = target.meta.shape ?? {};
+			const parentMeta = target.meta;
 			const nextSchema = { ...schema, ...extension };
 
 			const nextFn = (v: unknown): v is any => {
 				if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+				if (!checkProtoKeys(parentMeta, v)) return false;
 				const obj = v as any;
 				const schemaObj = nextSchema as Record<string, Guard<any>>;
 				for (const key of Object.keys(schemaObj)) {
 					if (!schemaObj[key]!(obj[key])) return false;
 				}
-				return true;
+				// Preserve strict/catchall against the extended schema's key set.
+				return checkExtraKeys(parentMeta, obj, nextSchema as Record<string, Guard<any>>);
 			};
 
 			const transform = (prev: any, original: any) => {
 				const parent = prev;
 				if (parent == null || typeof parent !== 'object' || Array.isArray(parent)) return parent;
+				// Use defineProperty for extension writes so a forbidden key in the extension
+				// schema can't trigger the __proto__ setter on a fresh object.
 				const extObj: any = {};
 				for (const k of Object.keys(extension)) {
-					if (k in original) extObj[k] = original[k];
+					if (Object.hasOwn(original, k)) {
+						Object.defineProperty(extObj, k, {
+							value: original[k],
+							writable: true,
+							enumerable: true,
+							configurable: true,
+						});
+					}
 				}
 				return { ...parent, ...extObj };
 			};
@@ -262,6 +381,9 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 				meta: {
 					name: `${target.meta.name}.extend(${Object.keys(extension).join(', ')})`,
 					shape: nextSchema,
+					...(parentMeta['strict'] === true && { strict: true }),
+					...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
+					...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
 				},
 				transform,
 			};
@@ -270,6 +392,7 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 	strict: property(
 		transformer<any, any, [], ObjectHelpers<any>>(target => {
 			const schema = target.meta.shape;
+			const parentMeta = target.meta;
 			const nextFn = (v: unknown): v is any => {
 				if (!target(v)) return false;
 				if (!schema) return true;
@@ -282,13 +405,17 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 				fn: nextFn,
 				meta: {
 					name: `${target.meta.name}.strict`,
+					// Flag so that downstream partial/pick/omit/extend/required can re-apply this constraint.
+					strict: true,
 					jsonSchema: { ...(target.meta.jsonSchema ?? {}), additionalProperties: false },
+					...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
 				},
 			};
 		})
 	) as any,
 	catchall: transformer<any, any, [Guard<any>], ObjectHelpers<any>>((target, catchall: Guard<any>) => {
 		const schema = target.meta.shape;
+		const parentMeta = target.meta;
 		const nextFn = (v: unknown): v is any => {
 			if (!target(v)) return false;
 			if (!schema) return true;
@@ -297,7 +424,15 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 			const schemaKeys = Object.keys(schema);
 			return keys.every(k => schemaKeys.includes(k) || catchall(obj[k]));
 		};
-		return { fn: nextFn, meta: { name: `${target.meta.name}.catchall(${catchall.meta.name})` } };
+		return {
+			fn: nextFn,
+			meta: {
+				name: `${target.meta.name}.catchall(${catchall.meta.name})`,
+				// Flag so that downstream partial/pick/omit/extend/required preserve this constraint.
+				catchall,
+				...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
+			},
+		};
 	}),
 	keyof: property(
 		transformer<any, any, [], any>(target => {
@@ -312,9 +447,46 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 	) as any,
 	readonly: property(
 		transformer<any, any, [], ObjectHelpers<any>>(target => ({
-			fn: (v: unknown): v is any => target(Object.freeze(v)),
+			fn: (v: unknown): v is any => target(v),
 			meta: { name: `${target.meta.name}.readonly` },
+			transform: (v: any) => (v != null && typeof v === 'object' ? Object.freeze(v) : v),
 		}))
+	) as any,
+	// `.allowProtoKeys` must be chained BEFORE shape-modifying helpers (partial,
+	// pick, omit, extend, required). Those helpers bail out on forbidden keys
+	// unless parent meta already has `allowProtoKeys: true`, so ordering matters.
+	// We rebuild the base predicate here from `target.meta.shape` (plus any
+	// strict/catchall the parent carried) so that `is.object(s).allowProtoKeys`
+	// starts from a known-safe root.
+	allowProtoKeys: property(
+		transformer<any, any, [], ObjectHelpers<any>>(target => {
+			const schema = target.meta.shape;
+			const parentMeta = target.meta;
+			const nextFn = (v: unknown): v is any => {
+				if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+				if (schema) {
+					const obj = v as Record<string, unknown>;
+					for (const key of Object.keys(schema)) {
+						if (!(schema as any)[key](obj[key])) return false;
+					}
+				}
+				return checkExtraKeys(
+					parentMeta,
+					v as Record<string, any>,
+					(schema ?? {}) as Record<string, Guard<any>>
+				);
+			};
+			return {
+				fn: nextFn,
+				meta: {
+					name: `${target.meta.name}.allowProtoKeys`,
+					allowProtoKeys: true,
+					...(schema && { shape: schema }),
+					...(parentMeta['strict'] === true && { strict: true }),
+					...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
+				},
+			};
+		})
 	) as any,
 
 	// --- Valuations ---

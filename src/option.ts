@@ -48,8 +48,6 @@ export type None = Err<never> &
  */
 export type Some<T> = Ok<NonVoid<T>> &
 	ResultMethods<NonVoid<T>, never> & {
-		value: NonVoid<T>;
-
 		/**
 		 * @deprecated You generally don't need to unwrap an Option. If you do, check if it's Some first, then access .value.
 		 *
@@ -81,8 +79,8 @@ export type Some<T> = Ok<NonVoid<T>> &
  *
  * @example Creating an Option from a nullable value
  * ```ts
- * import { fromNullable } from 'chas/option';
- * const x = fromNullable(5);
+ * import { nullable } from 'chas/option';
+ * const x = nullable(5);
  * expect(x.isSome()).toBe(true);
  * const val = x.value; // Accessible directly!
  * ```
@@ -107,7 +105,7 @@ export type OptionAsync<T> = ResultAsync<T, never>;
  * const val = x.value; // Accessible directly!
  * ```
  */
-export const some = <T extends NonNullable<unknown>>(value: T): Some<T> => ok(value) as unknown as Some<T>;
+export const some = <T>(value: NonVoid<T>): Some<T> => ok(value) as unknown as Some<T>;
 
 /**
  * Creates an `Option` representing no value.
@@ -128,7 +126,7 @@ export const none = (): None => err(undefined as never) as None;
  * @param value The value or promise to wrap in `SomeAsync`.
  * @returns An `OptionAsync` containing the value.
  */
-export const someAsync = <T extends NonVoid<unknown>>(value: T | Promise<T>): OptionAsync<T> =>
+export const someAsync = <T>(value: NonVoid<T> | Promise<NonVoid<T>>): OptionAsync<T> =>
 	okAsync(value) as OptionAsync<T>;
 
 /**
@@ -148,12 +146,12 @@ export const noneAsync = <T = never>(): OptionAsync<T> => errAsync(undefined as 
  *
  * @example
  * ```ts
- * const x = fromNullable(null); // none() -> Option<never>
- * const y = fromNullable(5);    // some(5) -> Option<number>
+ * const x = nullable(null); // none() -> Option<never>
+ * const y = nullable(5);    // some(5) -> Option<number>
  * ```
  */
 export const nullable = <T>(value: T): Option<T> => {
-	return value != null ? some(value) : none();
+	return value != null ? some(value as NonVoid<T>) : none();
 };
 
 /**
@@ -171,7 +169,7 @@ export const nullable = <T>(value: T): Option<T> => {
  * ```
  */
 export const nullableAsync = <T>(value: T | Promise<T>): OptionAsync<T> => {
-	return value != null ? someAsync(value) : noneAsync();
+	return fromSafePromise(Promise.resolve(value).then(v => nullable(v))) as OptionAsync<T>;
 };
 
 /**
@@ -191,7 +189,7 @@ export const nullableAsync = <T>(value: T | Promise<T>): OptionAsync<T> => {
 export const tryNullable = <T>(fn: () => T): Option<T> => {
 	try {
 		const res = fn();
-		return res != null ? some(res) : none();
+		return res != null ? some(res as NonVoid<T>) : none();
 	} catch {
 		return none();
 	}
@@ -213,7 +211,8 @@ export const tryNullable = <T>(fn: () => T): Option<T> => {
  */
 export const tryNullableAsync = <T>(fn: () => Promise<T>): OptionAsync<T> => {
 	return fromSafePromise(
-		fn()
+		Promise.resolve()
+			.then(() => fn())
 			.then(res => nullable(res))
 			.catch(() => none())
 	) as OptionAsync<T>;
@@ -388,7 +387,7 @@ export const wrapNullable = <Args extends unknown[], T>(fn: (...args: Args) => T
 	return (...args: Args): Option<T> => {
 		try {
 			const res = fn(...args);
-			return res != null ? some(res) : none();
+			return res != null ? some(res as NonVoid<T>) : none();
 		} catch {
 			return none();
 		}
@@ -417,7 +416,7 @@ export const wrapNullableAsync = <Args extends unknown[], T>(
 	return (...args: Args): OptionAsync<T> => {
 		return new ResultAsync(
 			fn(...args)
-				.then(res => (res != null ? some(res) : none()) as Option<T>)
+				.then(res => (res != null ? some(res as NonVoid<T>) : none()) as Option<T>)
 				.catch(() => none())
 		);
 	};

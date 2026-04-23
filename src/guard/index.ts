@@ -1,22 +1,22 @@
 // Guard API v2
 
-import { ArrayGuardFactory } from './objects/array.js';
+import { ArrayGuardFactory, type ArrayGuard } from './objects/array.js';
 import { InstanceofGuardFactory } from './objects/instanceof.js';
 import { BigIntGuard } from './primitives/bigint.js';
 import { BooleanGuard } from './primitives/boolean.js';
-import { NullGuard } from './primitives/null.js';
+import { NullableGuardFactory, NullGuard } from './primitives/null.js';
 import { NaNGuard, NumberGuard } from './primitives/number.js';
 import { StringGuard } from './primitives/string.js';
 import { SymbolGuard } from './primitives/symbol.js';
-import { UndefinedGuard, VoidGuard } from './primitives/undefined.js';
-import { ObjectGuardFactory } from './objects/object.js';
+import { OptionalGuardFactory, UndefinedGuard, VoidGuard } from './primitives/undefined.js';
+import { ObjectGuardFactory, type ObjectGuard } from './objects/object.js';
 import { RecordGuardFactory } from './objects/record.js';
 import { AnyGuard, NeverGuard, UnknownGuard } from './type-only.js';
 import { DateGuard } from './built-ins/date.js';
-import { RegExpGuardFactory } from './built-ins/regexp.js';
-import { UrlGuardFactory } from './built-ins/url.js';
-import { TupleGuardFactory } from './objects/tuple.js';
-import { LiteralGuardFactory } from './misc/literal.js';
+import { RegExpGuardFactory, type RegExpGuard } from './built-ins/regexp.js';
+import { UrlGuardFactory, type UrlGuard } from './built-ins/url.js';
+import { TupleGuardFactory, type TupleGuard } from './objects/tuple.js';
+import { LiteralGuardFactory, type LiteralGuard } from './misc/literal.js';
 import { UnionGuardFactory } from './misc/union.js';
 import { IntersectionGuardFactory } from './misc/intersection.js';
 import { LazyGuardFactory } from './misc/lazy.js';
@@ -27,21 +27,39 @@ import { OptionGuardFactory } from './custom/option.js';
 import { TaggedErrGuardFactory } from './custom/tagged-err.js';
 import { XorGuardFactory } from './misc/xor.js';
 import { TemplateLiteralGuardFactory } from './misc/template-literal.js';
-import { MapGuardFactory } from './built-ins/map.js';
-import { SetGuardFactory } from './built-ins/set.js';
+import { MapGuardFactory, type MapGuard } from './built-ins/map.js';
+import { SetGuardFactory, type SetGuard } from './built-ins/set.js';
 import { PromiseGuard } from './built-ins/promise.js';
 import { ErrorGuard } from './built-ins/error.js';
 import { FileGuard } from './built-ins/file.js';
+import { FormDataGuard } from './built-ins/form-data.js';
+import { Uint8ArrayGuard, BufferGuard, ArrayBufferGuard, DataViewGuard } from './built-ins/binary.js';
+import { IterableGuard, AsyncIterableGuard } from './built-ins/iterable.js';
+import { GeneratorGuard, AsyncGeneratorGuard } from './built-ins/generator.js';
 import { JsonGuard } from './misc/json.js';
 import { CustomGuardFactory } from './custom/custom.js';
 import { FunctionGuardFactory } from './primitives/function.js';
+import { NullishGuardFactory } from './primitives/nullish.js';
+import type { DeepWritable } from '../utils.js';
 
 // schema utilities
-export { defineSchemas, defineSchema, formatErrors, flattenErrors, AggregateGuardError } from './schema.js';
+export { defineSchemas, defineSchema, formatErrors, flattenErrors, AggregateGuardErr } from './schema.js';
 export type { Schema, InferSchema, InferInput } from './schema.js';
 
-// core types
-export type { Guard, InferGuard, GuardMeta, GuardErr, Brand } from './shared.js';
+export type {
+	// core guard types
+	Guard,
+	InferGuard,
+	GuardMeta,
+	GuardErr,
+
+	// branding utilities
+	Brand,
+	Unbrand,
+	IsBranded,
+	HasBrand,
+	GetBrand,
+} from './shared.js';
 
 // guard types, factories, helpers
 export type { ObjectHelpers } from './objects/shared.js';
@@ -83,8 +101,9 @@ export type { NumberGuard, NaNGuard, NumberHelpers } from './primitives/number.j
 export type { BooleanGuard, BooleanHelpers } from './primitives/boolean.js';
 export type { BigIntGuard, BigIntHelpers } from './primitives/bigint.js';
 export type { SymbolGuard, SymbolHelpers } from './primitives/symbol.js';
-export type { UndefinedGuard, VoidGuard } from './primitives/undefined.js';
-export type { NullGuard } from './primitives/null.js';
+export type { UndefinedGuard, VoidGuard, OptionalGuard, OptionalGuardFactory } from './primitives/undefined.js';
+export type { NullGuard, NullableGuard, NullableGuardFactory } from './primitives/null.js';
+export type { NullishGuard, NullishGuardFactory } from './primitives/nullish.js';
 export type { AnyGuard, UnknownGuard, NeverGuard } from './type-only.js';
 export type { FileGuard, FileHelpers } from './built-ins/file.js';
 export type { ErrorGuard, ErrorHelpers } from './built-ins/error.js';
@@ -92,6 +111,9 @@ export type { PromiseGuard } from './built-ins/promise.js';
 export type { DateGuard, DateHelpers } from './built-ins/date.js';
 export type { InstanceofGuardFactory, InstanceofGuard } from './objects/instanceof.js';
 export type { CustomGuardFactory, CustomGuard } from './custom/custom.js';
+export type { Uint8ArrayGuard, BufferGuard, ArrayBufferGuard, DataViewGuard } from './built-ins/binary.js';
+export type { IterableGuard, AsyncIterableGuard } from './built-ins/iterable.js';
+export type { GeneratorGuard, AsyncGeneratorGuard } from './built-ins/generator.js';
 
 // guard authoring utilities for custom guard creation
 export {
@@ -196,7 +218,43 @@ const baseIs = {
 	 */
 	null: NullGuard,
 	/**
-	 * Creates a Guard that validates that a value is either null or undefined.
+	 * Creates a Guard that validates that a value is null or satisfies the inner guard.
+	 * Equivalent to `is.union(is.null, guard)` or `is.null.or(guard)` or `is.<guard>.nullable`
+	 *
+	 * @example
+	 * const guard = is.nullable(is.number);
+	 * guard(123); // true
+	 * guard(null); // true
+	 * guard('hello'); // false
+	 */
+	nullable: NullableGuardFactory,
+	/**
+	 * Creates a Guard that validates that a value is undefined or satisfies the inner guard.
+	 * Equivalent to `is.union(is.undefined, guard)` or `is.undefined.or(guard)` or `is.<guard>.optional`
+	 *
+	 * @example
+	 * const guard = is.optional(is.number);
+	 * guard(123); // true
+	 * guard(undefined); // true
+	 * guard('hello'); // false
+	 */
+	optional: OptionalGuardFactory,
+	/**
+	 * Creates a Guard that validates that a value is null, undefined, or satisfies the inner guard.
+	 * Equivalent to `is.union(is.null, is.undefined, guard)` or `is.null.or(is.undefined.or(guard))` or `is.<guard>.nullish`
+	 *
+	 * @example
+	 * const guard = is.nullish;
+	 * guard(null); // true
+	 * guard(undefined); // true
+	 * guard('hello'); // false
+	 */
+	nullish: NullishGuardFactory,
+	/**
+	 * Creates a Guard that validates that a value is `undefined`, narrowing to `void`.
+	 *
+	 * This matches TypeScript's `void` type, which is assignable from `undefined` only.
+	 * For "null or undefined", use `.nullish()` on any guard or `is.union(is.null, is.undefined)`.
 	 */
 	void: VoidGuard,
 
@@ -224,6 +282,7 @@ const baseIs = {
 	 * guard.parse([1, 2, 3]); // Result<number[], GuardErr>
 	 */
 	array: ArrayGuardFactory,
+
 	/**
 	 * Creates a Guard that validates that a value is an object with a specific shape.
 	 *
@@ -235,6 +294,20 @@ const baseIs = {
 	 *
 	 * guard({ name: 'Chase', age: 99 }); // true
 	 * guard({ name: 'Chase', age: 99, extra: true }); // false (due to .strict)
+	 *
+	 * ### Prototype-pollution safety
+	 *
+	 * By default, input whose own keys include `__proto__`, `constructor`, or
+	 * `prototype` is rejected — even if the schema would otherwise accept it —
+	 * so validated values are safe to pass to code that assigns by computed key.
+	 *
+	 * @example
+	 * const safe = is.object({ a: is.string });
+	 * safe({ a: 'x', __proto__: { polluted: true } }); // false
+	 *
+	 * // Use `.allowProtoKeys` as the FIRST helper after is.object() to opt out.
+	 * const lax = is.object({ a: is.string }).allowProtoKeys;
+	 * lax({ a: 'x', __proto__: { polluted: true } }); // true
 	 */
 	object: ObjectGuardFactory,
 	/**
@@ -269,6 +342,13 @@ const baseIs = {
 	 * // Partial exhaustive — keys become optional
 	 * const guard = is.record(is.enum(['a', 'b'] as const), is.string).partial;
 	 * guard({ a: 'x' }); // true
+	 *
+	 * @example
+	 * // Prototype-pollution safety: `__proto__`, `constructor`, and `prototype`
+	 * // are rejected as own keys by default. Chain `.allowProtoKeys` immediately
+	 * // after `is.record(...)` to opt in.
+	 * is.record(is.string, is.number)({ __proto__: 1 }); // false
+	 * is.record(is.string, is.number).allowProtoKeys({ __proto__: 1 }); // true
 	 */
 	record: RecordGuardFactory,
 	/**
@@ -318,27 +398,43 @@ const baseIs = {
 	/**
 	 * Creates a Guard that validates that a value is a RegExp.
 	 *
-	 * @example
-	 * const guard = is.regexp;
-	 * guard(/hello/); // true
-	 * guard('hello'); // false
+	 * Call with no arguments for a base RegExp guard, or pass a pattern (RegExp or
+	 * string) to require `v.source === pattern.source`. Flags default to the passed
+	 * RegExp's flags; provide a second argument or `{ flags }` to override.
 	 *
 	 * @example
-	 * const guard = is.regexp(/hello/);
-	 * guard.parse(/hello/); // Result<RegExp, GuardErr>
+	 * is.regexp()(/hello/);                    // true — base guard matches any RegExp
+	 * is.regexp(/hello/)(/hello/);             // true — same source, same flags
+	 * is.regexp(/hello/)(/world/);             // false — different source
+	 * is.regexp(/hello/i)(/hello/);            // false — flag mismatch
+	 * is.regexp('hello')(/hello/);             // true — string pattern
+	 * is.regexp({ flags: 'g' })(/hello/g);     // true — flags-only match
 	 */
 	regexp: RegExpGuardFactory,
 	/**
-	 * Creates a Guard that validates that a value is a URL.
+	 * Creates a Guard that validates that a value is a URL-parseable string.
+	 *
+	 * `is.url` is a factory — call it (with or without options) to get a guard.
+	 * Narrows to `string`, not `URL` instances. Use `.transform(v => new URL(v))`
+	 * to produce URL instances from validated strings.
 	 *
 	 * @example
-	 * const guard = is.url;
-	 * guard(new URL('https://example.com')); // true
-	 * guard('https://example.com'); // false
+	 * const guard = is.url();
+	 * guard('https://example.com'); // true
+	 * guard('not a url');           // false
+	 * guard(new URL('https://x'));  // false — predicate narrows to string
 	 *
 	 * @example
-	 * const guard = is.url.transform(u => u.href);
-	 * guard.parse(new URL('https://example.com')); // Result<string, GuardErr>
+	 * // Options restrict the hostname or protocol via regex
+	 * const httpsOnly = is.url({ protocol: /^https$/ });
+	 * httpsOnly('https://example.com'); // true
+	 * httpsOnly('http://example.com');  // false
+	 *
+	 * @example
+	 * // Property helpers compose cleanly
+	 * is.url().https('https://example.com');              // true
+	 * is.url().hasSearch('https://x.com?q=1');             // true
+	 * is.url().hostname(/example/)('https://example.com'); // true
 	 */
 	url: UrlGuardFactory,
 	/**
@@ -372,13 +468,29 @@ const baseIs = {
 	 */
 	set: SetGuardFactory,
 	/**
-	 * Creates a Guard that validates that a value is a `Promise` (or thenable).
+	 * Creates a Guard that validates that a value is a `Promise` or a thenable
+	 * (any object with `.then` and `.catch` methods).
+	 *
+	 * Note: native `Promise` instances and any duck-typed thenable (e.g. a custom
+	 * class exposing `.then`/`.catch`) will both pass this check. Use
+	 * `is.instanceOf(Promise)` if you need to restrict to native promises only.
 	 *
 	 * @example
 	 * is.promise(Promise.resolve(42)); // true
+	 * is.promise({ then() {}, catch() {} }); // true (thenable)
 	 * is.promise(42); // false
 	 */
 	promise: PromiseGuard,
+	formData: FormDataGuard,
+	uint8Array: Uint8ArrayGuard,
+	buffer: BufferGuard,
+	arrayBuffer: ArrayBufferGuard,
+	dataView: DataViewGuard,
+
+	iterable: IterableGuard,
+	asyncIterable: AsyncIterableGuard,
+	generator: GeneratorGuard,
+	asyncGenerator: AsyncGeneratorGuard,
 	/**
 	 * Creates a Guard that validates that a value is an `Error` instance.
 	 *
@@ -627,8 +739,17 @@ const baseIs = {
 	/**
 	 * Factory that creates a Guard for tagged errors (from `defineErrs`).
 	 *
-	 * Accepts an error factory (full type narrowing), the entire factories object
-	 * (union of all variants), or a plain string tag (structural `_tag` matching).
+	 * Three input shapes, three runtime checks:
+	 *
+	 * - **Single factory** (e.g. `AppError.NotFound`) — delegates to the
+	 *   factory's own `.is()` predicate, so brand checks are honored. Narrows
+	 *   to the factory's full return type, including custom fields.
+	 * - **Factories object** (e.g. `AppError` itself) — runs each variant's
+	 *   `.is()` and returns true on the first match. Narrows to the union of
+	 *   their return types.
+	 * - **String tag** (e.g. `'NotFound'`) — purely structural. Checks
+	 *   `_tag` equality only, so any `{ _tag: 'NotFound' }` object matches
+	 *   regardless of origin. Use factories when you need brand safety.
 	 *
 	 * @example
 	 * ```ts
@@ -637,13 +758,13 @@ const baseIs = {
 	 *   Generic: (message: string) => ({ message }),
 	 * });
 	 *
-	 * // Single factory — narrows to full type
+	 * // Single factory — narrows to full type (brand-safe)
 	 * is.tagged(AppError.NotFound)(err); // value.resource, value.id typed
 	 *
-	 * // Factories object — union of all variants
+	 * // Factories object — union of all variants (brand-safe)
 	 * is.tagged(AppError)(err); // NotFoundErr | GenericErr
 	 *
-	 * // String tag — narrows to TaggedErr & { _tag: 'NotFound' }
+	 * // String tag — structural match only
 	 * is.tagged('NotFound')(err);
 	 * ```
 	 */
@@ -667,6 +788,26 @@ const baseIs = {
 	 * ```
 	 */
 	custom: CustomGuardFactory,
+	/**
+	 * Creates a Guard by reflecting on a constant primitive, array, tuple, or plain object.
+	 *
+	 * Use this to build strict validation schemas directly from sample data and mock objects.
+	 *
+	 * @example
+	 * ```ts
+	 * // Broad inference
+	 * const guard = is.from({ name: 'Alice', age: 30 });
+	 * // Inferred as: is.object({ name: is.string, age: is.number })
+	 *
+	 * // Strict literal inference
+	 * const strict = is.from({ status: 'active', tags: ['vip'] } as const, { literal: true });
+	 * // Inferred as: is.object({ status: is.literal('active'), tags: is.tuple([is.literal('vip')]) }).strict
+	 * ```
+	 *
+	 * @param value The object or primitive to derive a schema from.
+	 * @param options Optional builder settings, such as `{ literal: true }` to enforce exact values.
+	 */
+	from: buildFromConstant,
 };
 
 /**
@@ -780,6 +921,144 @@ export type IsAPI<Extensions = {}> = typeof baseIs & {
  * ```
  */
 export const is: IsAPI = Object.assign(baseIs, {
-	extend: <E extends Record<string, any>>(extensions: E): IsAPI<E> =>
-		({ ...baseIs, extend: is.extend, ...extensions }) as IsAPI<E>,
+	extend: <E extends Record<string, any>>(extensions: E): IsAPI<E> => {
+		for (const key of Object.keys(extensions)) {
+			if (key === 'extend') {
+				throw new Error(
+					`is.extend: cannot override reserved key 'extend'. Choose a different name for your custom guard.`
+				);
+			}
+			if (key in baseIs) {
+				throw new Error(
+					`is.extend: key '${key}' collides with a built-in guard. Choose a different name for your custom guard.`
+				);
+			}
+		}
+		return { ...baseIs, extend: is.extend, ...extensions } as IsAPI<E>;
+	},
 });
+
+type GuardFromKnownType<T> = T extends string
+	? StringGuard
+	: T extends number
+		? NumberGuard
+		: T extends boolean
+			? BooleanGuard
+			: T extends null
+				? NullGuard
+				: T extends undefined
+					? UndefinedGuard
+					: T extends symbol
+						? SymbolGuard
+						: T extends bigint
+							? BigIntGuard
+							: T extends Date
+								? DateGuard
+								: T extends RegExp
+									? RegExpGuard
+									: T extends URL
+										? UrlGuard
+										: T extends File
+											? FileGuard
+											: T extends FormData
+												? FormDataGuard
+												: T extends Buffer
+													? BufferGuard
+													: T extends Uint8Array
+														? Uint8ArrayGuard
+														: T extends ArrayBuffer
+															? ArrayBufferGuard
+															: T extends DataView
+																? DataViewGuard
+																: T extends Error
+																	? ErrorGuard
+																	: T extends Promise<any>
+																		? PromiseGuard
+																		: T extends Map<infer K, infer V>
+																			? MapGuard<K, V>
+																			: T extends Set<infer V>
+																				? SetGuard<V>
+																				: T extends readonly (infer I)[]
+																					? ArrayGuard<
+																							[GuardFromKnownType<I>]
+																						>
+																					: T extends Record<string, any>
+																						? ObjectGuard<{
+																								-readonly [K in keyof T]: T[K];
+																							}>
+																						: UnknownGuard;
+
+type GuardFromLiteral<T> = T extends string | number | boolean | bigint
+	? LiteralGuard<[T]>
+	: T extends null
+		? NullGuard
+		: T extends undefined
+			? UndefinedGuard
+			: T extends Map<infer K, infer V>
+				? MapGuard<K, V>
+				: T extends Set<infer V>
+					? SetGuard<V>
+					: T extends readonly [infer _H, ...infer _R] | readonly []
+						? TupleGuard<{ [K in keyof T]: GuardFromLiteral<T[K] & {}> }>
+						: T extends readonly (infer I)[]
+							? ArrayGuard<[GuardFromLiteral<I>]>
+							: T extends Record<string, any>
+								? ObjectGuard<DeepWritable<T>>
+								: GuardFromKnownType<T>;
+
+export interface BuildOptions {
+	/** If true, primitives like strings and numbers will cleanly map to strict literal guards */
+	literal?: boolean;
+}
+
+// Overload 1: literal is explicitly true
+export function buildFromConstant<const T>(value: T, options: { literal: true }): GuardFromLiteral<T>;
+// Overload 2: literal is omitted, undefined, or false
+export function buildFromConstant<T>(value: T, options?: { literal?: false }): GuardFromKnownType<T>;
+// Overload 3: variable options where literal is not known at compile time
+export function buildFromConstant<T>(value: T, options: BuildOptions): GuardFromKnownType<T> | GuardFromLiteral<T>;
+// Main Implementation
+export function buildFromConstant<const T>(value: T, options?: BuildOptions): any {
+	const asLiteral = options?.literal ?? false;
+
+	if (typeof value === 'undefined') return is.undefined;
+	if (value === null) return is.null;
+
+	if (value instanceof Date) return is.date;
+	if (value instanceof RegExp) return is.regexp();
+	if (value instanceof URL) return is.url();
+	if (value instanceof File) return is.file;
+	if (value instanceof Error) return is.error;
+	if (value instanceof Promise) return is.promise;
+	if (typeof FormData !== 'undefined' && value instanceof FormData) return is.formData;
+	if (value instanceof Uint8Array) {
+		if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return is.buffer;
+		return is.uint8Array;
+	}
+	if (value instanceof ArrayBuffer) return is.arrayBuffer;
+	if (value instanceof DataView) return is.dataView;
+
+	if (Array.isArray(value)) {
+		const innerGuards = value.map(item => buildFromConstant(item, options as BuildOptions));
+		return asLiteral ? is.tuple(innerGuards as any) : is.array(...(innerGuards as any));
+	}
+
+	// works with plain objects with that do not have a prototype or a constructor
+	const proto = Object.getPrototypeOf(value);
+	if (value && typeof value === 'object' && (proto === Object.prototype || proto === null)) {
+		const shape: any = {};
+		for (const [k, v] of Object.entries(value)) {
+			shape[k] = buildFromConstant(v, options as BuildOptions);
+		}
+		return asLiteral ? is.object(shape).strict : is.object(shape);
+	}
+
+	// For primitives, conditionally return a literal guard or a generic primitive guard
+	if (typeof value === 'string') return asLiteral ? is.literal(value) : is.string;
+	if (typeof value === 'number') return asLiteral ? is.literal(value) : is.number;
+	if (typeof value === 'boolean') return asLiteral ? is.literal(value) : is.boolean;
+	if (typeof value === 'symbol') return is.symbol; // Symbols can't realistically be validated across executions reliably
+	if (typeof value === 'bigint') return asLiteral ? is.literal(value) : is.bigint;
+
+	return is.unknown;
+}

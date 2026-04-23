@@ -3,7 +3,12 @@ import { makeGuard, type Guard, factory } from '../shared.js';
 export type RegExpGuard = Guard<RegExp, RegExpHelpers>;
 
 export interface RegExpGuardFactory {
-	(options?: { pattern?: string | RegExp; flags?: string }): RegExpGuard;
+	/** Base guard — matches any RegExp. */
+	(): RegExpGuard;
+	/** Matches a RegExp whose `.source` equals the provided pattern's source and (if given) whose flags match. */
+	(pattern: RegExp | string, flags?: string): RegExpGuard;
+	/** Object form — matches by explicit pattern/flags options. */
+	(options: { pattern?: string | RegExp; flags?: string }): RegExpGuard;
 }
 
 export interface RegExpHelpers {
@@ -51,15 +56,37 @@ const baseRegExpGuard = makeGuard(
 	regexpHelpers
 );
 
-export const RegExpGuardFactory: RegExpGuardFactory = (options?: { pattern?: string | RegExp; flags?: string }) => {
-	const { pattern, flags } = options ?? {};
+export const RegExpGuardFactory: RegExpGuardFactory = ((
+	patternOrOptions?: RegExp | string | { pattern?: string | RegExp; flags?: string },
+	flagsArg?: string
+) => {
+	// Normalize arguments into { pattern, flags }.
+	let pattern: string | RegExp | undefined;
+	let flags: string | undefined;
+
+	if (patternOrOptions === undefined) {
+		// no-op
+	} else if (patternOrOptions instanceof RegExp) {
+		// `is.regexp(/foo/i)` — infer flags from the source RegExp unless overridden.
+		pattern = patternOrOptions.source;
+		flags = flagsArg ?? patternOrOptions.flags;
+	} else if (typeof patternOrOptions === 'string') {
+		pattern = patternOrOptions;
+		flags = flagsArg;
+	} else {
+		pattern = patternOrOptions.pattern;
+		flags = patternOrOptions.flags;
+	}
+
 	if (pattern === undefined && flags === undefined) return baseRegExpGuard;
 
 	const p = pattern!;
 	const predicate = (v: unknown): v is RegExp => {
 		if (!(v instanceof RegExp)) return false;
-		const src = typeof p === 'string' ? p : p.source;
-		if (v.source !== src) return false;
+		if (pattern !== undefined) {
+			const src = typeof p === 'string' ? p : p.source;
+			if (v.source !== src) return false;
+		}
 
 		if (flags !== undefined) {
 			const sorted = (f: string) => [...f].sort().join('');
@@ -68,8 +95,9 @@ export const RegExpGuardFactory: RegExpGuardFactory = (options?: { pattern?: str
 		return true;
 	};
 
-	const name = pattern
-		? `regexp<${typeof pattern === 'string' ? pattern : pattern.source}${flags ? `, ${flags}` : ''}>`
-		: 'regexp';
+	const name =
+		pattern !== undefined
+			? `regexp<${typeof pattern === 'string' ? pattern : pattern.source}${flags ? `, ${flags}` : ''}>`
+			: `regexp<flags: ${flags}>`;
 	return makeGuard(predicate, { name, id: 'RegExp' }, regexpHelpers);
-};
+}) as RegExpGuardFactory;

@@ -22,6 +22,22 @@ type AsyncStep =
  * on any `Guard<T>`. Sync helpers cannot be chained after entering async mode —
  * add them to the sync guard first.
  *
+ * ### Composition rules
+ *
+ * 1. **Sync-first.** Build up any sync helpers (`.email`, `.min`, `.where`, etc.)
+ *    on the base guard before calling `.whereAsync`/`.refineAsync`/`.transformAsync`.
+ *    Once you have an `AsyncGuard<T>`, you can only chain other async steps.
+ * 2. **Order is preserved.** Async steps run sequentially in declaration order
+ *    against the value returned by the previous step, so later steps may depend
+ *    on earlier `refineAsync`/`transformAsync` output.
+ * 3. **Fail-fast.** Sync validation runs first; if it fails, no async steps run.
+ *    The first failing async predicate short-circuits the chain with a `GuardErr`.
+ * 4. **Type narrowing.** `transformAsync<U>` changes the guard's type parameter;
+ *    `refineAsync` preserves it. `whereAsync` is a pure predicate (no rewrite).
+ * 5. **Not composable with union/intersection.** `AsyncGuard` is a terminal shape —
+ *    it cannot be passed to `is.union`, `is.object`, or used as a tuple element.
+ *    Compose at the sync layer, then go async once, at the edge of validation.
+ *
  * @example
  * ```ts
  * const UniqueEmail = is.string.email.whereAsync(async v => {

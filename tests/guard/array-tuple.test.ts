@@ -3,7 +3,8 @@ import { is } from '../../src/guard/index.js';
 
 describe('is.array (v2)', () => {
 	it('basic array validation', () => {
-		expect(is.array(is.number, is.string)([1, 2, 3])).toBe(true);
+		const example = is.array(is.number, is.string);
+		expect(example([1, 2, 3, 'a'])).toBe(true);
 		expect(is.array()([])).toBe(true);
 		expect(is.array()({})).toBe(false);
 		expect(is.array()(null)).toBe(false);

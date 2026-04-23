@@ -6,7 +6,7 @@ import {
 	defineSchema,
 	formatErrors,
 	flattenErrors,
-	AggregateGuardError,
+	AggregateGuardErr,
 	type InferSchema,
 } from '../../src/guard/schema.js';
 
@@ -458,47 +458,47 @@ describe('schema.assert', () => {
 		expect(result).toEqual({ name: 'Chase', age: 25 });
 	});
 
-	it('throws AggregateGuardError for invalid data', () => {
-		expect(() => schemas.User.assert({ name: 123, age: 'old' })).toThrow(AggregateGuardError);
+	it('throws AggregateGuardErr for invalid data', () => {
+		expect(() => schemas.User.assert({ name: 123, age: 'old' })).toThrow(AggregateGuardErr);
 	});
 
-	it('AggregateGuardError contains all errors', () => {
+	it('AggregateGuardErr contains all errors', () => {
 		try {
 			schemas.User.assert({ name: 123, age: 'old' });
 			expect.unreachable('should have thrown');
 		} catch (e) {
-			expect(e).toBeInstanceOf(AggregateGuardError);
-			const agg = e as AggregateGuardError;
+			expect(e).toBeInstanceOf(AggregateGuardErr);
+			const agg = e as AggregateGuardErr;
 			expect(agg.errors.length).toBe(2);
 			expect(agg.schemaName).toBe('User');
 		}
 	});
 
-	it('AggregateGuardError has descriptive message', () => {
+	it('AggregateGuardErr has descriptive message', () => {
 		try {
 			schemas.User.assert({ name: 123, age: 'old' });
 		} catch (e) {
-			const agg = e as AggregateGuardError;
+			const agg = e as AggregateGuardErr;
 			expect(agg.message).toContain('User');
 			expect(agg.message).toContain('2 validation errors');
 		}
 	});
 
-	it('AggregateGuardError.format() returns formatted errors', () => {
+	it('AggregateGuardErr.format() returns formatted errors', () => {
 		try {
 			schemas.User.assert({ name: 123, age: 'old' });
 		} catch (e) {
-			const formatted = (e as AggregateGuardError).format();
+			const formatted = (e as AggregateGuardErr).format();
 			expect(formatted['name']).toBeDefined();
 			expect(formatted['age']).toBeDefined();
 		}
 	});
 
-	it('AggregateGuardError.flatten() returns flat array', () => {
+	it('AggregateGuardErr.flatten() returns flat array', () => {
 		try {
 			schemas.User.assert({ name: 123, age: 'old' });
 		} catch (e) {
-			const flat = (e as AggregateGuardError).flatten();
+			const flat = (e as AggregateGuardErr).flatten();
 			expect(flat.length).toBe(2);
 			expect(flat.every(f => typeof f.path === 'string' && typeof f.message === 'string')).toBe(true);
 		}
@@ -843,9 +843,9 @@ describe('guard.toSchema()', () => {
 		expect(schema.assert({ name: 'Chase' })).toEqual({ name: 'Chase' });
 	});
 
-	it('assert() throws AggregateGuardError for invalid data', () => {
+	it('assert() throws AggregateGuardErr for invalid data', () => {
 		const schema = is.object({ name: is.string }).toSchema('User');
-		expect(() => schema.assert({ name: 123 })).toThrow(AggregateGuardError);
+		expect(() => schema.assert({ name: 123 })).toThrow(AggregateGuardErr);
 	});
 
 	it('is() delegates to the underlying guard', () => {
@@ -898,5 +898,18 @@ describe('guard.toSchema()', () => {
 		type User = typeof schema.$infer;
 		const _check: User = { name: 'Chase', age: 25 };
 		expect(true).toBe(true);
+	});
+
+	it('generates values', async () => {
+		const schema = is.object({ name: is.string, age: is.number }).toSchema('User');
+		const value = await schema.generate();
+		expect(schema.is(value)).toBe(true);
+	});
+
+	it('generates multiple values', async () => {
+		const schema = is.object({ name: is.string, age: is.number }).toSchema('User');
+		const values = await schema.generate(5);
+		expect(values.length).toBe(5);
+		expect(values.every(v => schema.is(v))).toBe(true);
 	});
 });

@@ -49,13 +49,24 @@ describe('is.json', () => {
 		expect(is.json({ a: () => {} })).toBe(false);
 	});
 
-	it('rejects non-JSON collections (Map, Set)', () => {
-		// These might pass if they are empty because of the recursive object check,
-		// but they are not plain objects.
-		// However, let's see what the current implementation does.
-		// Object.values(new Map()) is [] if it has no enumerable properties.
-		expect(is.json(new Map())).toBe(true); // Implementation detail: empty objects pass
-		expect(is.json(new Set())).toBe(true);
+	it('rejects non-JSON collections (Map, Set, Date, RegExp)', () => {
+		// Only plain objects (prototype === Object.prototype or null) count as JSON.
+		expect(is.json(new Map())).toBe(false);
+		expect(is.json(new Set())).toBe(false);
+		expect(is.json(new Map([['a', 1]]))).toBe(false);
+		expect(is.json(new Date())).toBe(false);
+		expect(is.json(/regex/)).toBe(false);
+		class User {
+			name = 'Alice';
+		}
+		expect(is.json(new User())).toBe(false);
+	});
+
+	it('rejects non-finite numbers (NaN, Infinity)', () => {
+		expect(is.json(NaN)).toBe(false);
+		expect(is.json(Infinity)).toBe(false);
+		expect(is.json(-Infinity)).toBe(false);
+		expect(is.json({ x: NaN })).toBe(false);
 	});
 
 	it('narrows correctly', () => {

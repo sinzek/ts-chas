@@ -37,13 +37,13 @@ The inferred TypeScript type of the guard reflects the declared signature:
 
 ## `.impl` -- synchronous validated wrapper
 
-`.impl` wraps a function so that every call validates arguments first and the return value second. If validation fails, an `AggregateGuardError` is thrown.
+`.impl` wraps a function so that every call validates arguments first and the return value second. If validation fails, an `AggregateGuardErr` is thrown.
 
 ```ts
 const add = guard.impl((a, b) => a + b);
 
 add(2, 3); // 5
-add(2, '3' as any); // throws AggregateGuardError: args[1]: Expected number
+add(2, '3' as any); // throws AggregateGuardErr: args[1]: Expected number
 ```
 
 Error paths use `args[N]` for argument positions and `return` for the output:
@@ -73,14 +73,14 @@ const fetchUser = is
 	});
 
 await fetchUser('u1'); // { id: 'u1', name: 'Alice' }
-await fetchUser(42 as any); // throws AggregateGuardError: args[0]: Expected string
+await fetchUser(42 as any); // throws AggregateGuardErr: args[0]: Expected string
 ```
 
 ---
 
 ## `.implResult` and `.implResultAsync` -- non-throwing variants
 
-If you prefer not to use exceptions for validation failures, use the Result-returning variants. They wrap the same logic but return `Result<T, AggregateGuardError>` instead of throwing.
+If you prefer not to use exceptions for validation failures, use the Result-returning variants. They wrap the same logic but return `Result<T, AggregateGuardErr>` instead of throwing.
 
 ```ts
 const add = is
@@ -99,7 +99,7 @@ err.isErr(); // true
 err.unwrapErr().message; // '...: args[1]: Expected number'
 ```
 
-The async equivalent returns `ResultAsync<T, AggregateGuardError>`:
+The async equivalent returns `ResultAsync<T, AggregateGuardErr>`:
 
 ```ts
 const fetchUser = is
@@ -182,7 +182,7 @@ handlerGuard({ name: 'ping', execute: 'not a function' }); // false
 
 ---
 
-## Error shape: `AggregateGuardError`
+## Error shape: `AggregateGuardErr`
 
 Thrown by `.impl` and `.implAsync` when validation fails. It is an `Error` subclass with two extra properties:
 
@@ -194,12 +194,12 @@ Thrown by `.impl` and `.implAsync` when validation fails. It is an `Error` subcl
 The `.message` property summarizes the first three errors inline. For structured error reporting you can iterate `.errors` directly:
 
 ```ts
-import { AggregateGuardError } from 'ts-chas/guard';
+import { AggregateGuardErr } from 'ts-chas/guard';
 
 try {
 	add(2, '3' as any);
 } catch (e) {
-	if (e instanceof AggregateGuardError) {
+	if (e instanceof AggregateGuardErr) {
 		for (const err of e.errors) {
 			console.log(err.path.join('.'), err.message);
 			// 'args[1]'  'Expected number, got string'
@@ -212,12 +212,12 @@ try {
 
 ## Summary
 
-| Method                 | Returns                               | Throws on failure           |
-| ---------------------- | ------------------------------------- | --------------------------- |
-| `.impl(fn)`            | `ReturnType<fn>`                      | Yes (`AggregateGuardError`) |
-| `.implAsync(fn)`       | `Promise<ReturnType<fn>>`             | Yes (rejected promise)      |
-| `.implResult(fn)`      | `Result<T, AggregateGuardError>`      | No                          |
-| `.implResultAsync(fn)` | `ResultAsync<T, AggregateGuardError>` | No                          |
+| Method                 | Returns                             | Throws on failure         |
+| ---------------------- | ----------------------------------- | ------------------------- |
+| `.impl(fn)`            | `ReturnType<fn>`                    | Yes (`AggregateGuardErr`) |
+| `.implAsync(fn)`       | `Promise<ReturnType<fn>>`           | Yes (rejected promise)    |
+| `.implResult(fn)`      | `Result<T, AggregateGuardErr>`      | No                        |
+| `.implResultAsync(fn)` | `ResultAsync<T, AggregateGuardErr>` | No                        |
 
 All four variants:
 

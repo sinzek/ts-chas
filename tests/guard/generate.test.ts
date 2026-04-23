@@ -654,4 +654,55 @@ describe('built-in type generation', () => {
 		const vals = (await guard.generate(10)) as Record<string, string>[];
 		expect(vals.every(v => typeof v === 'object')).toBe(true);
 	});
+
+	// ---- FormData generation ------------------------------------------------
+
+	it('is.formData generates FormData instances', async () => {
+		const validate = Object.prototype.toString.call(typeof process !== 'undefined' ? process : 0) === '[object process]' && typeof FormData === 'undefined' ? false : true;
+		if (!validate) return; // Skip if missing natively
+
+		const guard = is.formData;
+		const vals = (await guard.generate(10)) as FormData[];
+		expect(vals.every(v => v instanceof FormData)).toBe(true);
+		expect(allValid(guard, vals)).toBe(true);
+	});
+
+	// ---- Binary generation --------------------------------------------------
+
+	it('is.uint8Array generates Uint8Array instances', async () => {
+		const guard = is.uint8Array;
+		const vals = (await guard.generate(10)) as Uint8Array[];
+		expect(vals.every(v => v instanceof Uint8Array)).toBe(true);
+		expect(allValid(guard, vals)).toBe(true);
+	});
+
+	it('is.buffer generates Buffer instances', async () => {
+		if (typeof Buffer === 'undefined') return;
+		const guard = is.buffer;
+		const vals = (await guard.generate(10)) as Buffer[];
+		expect(vals.every(v => Buffer.isBuffer(v))).toBe(true);
+		expect(allValid(guard, vals)).toBe(true);
+	});
+
+	it('is.uint8Array.size(16) respects constraints', async () => {
+		const guard = is.uint8Array.size(16);
+		const vals = (await guard.generate(10)) as Uint8Array[];
+		expect(vals.every(v => v.byteLength === 16)).toBe(true);
+	});
+
+	// ---- Iterables generation -----------------------------------------------
+
+	it('is.iterable generates properly structured iterables', async () => {
+		const guard = is.iterable;
+		const vals = (await guard.generate(10)) as Iterable<any>[];
+		expect(vals.every(v => typeof v[Symbol.iterator] === 'function')).toBe(true);
+		expect(allValid(guard, vals)).toBe(true);
+	});
+
+	it('is.asyncGenerator generates structural async generators', async () => {
+		const guard = is.asyncGenerator;
+		const vals = (await guard.generate(10)) as AsyncGenerator<any>[];
+		expect(vals.every(v => typeof v[Symbol.asyncIterator] === 'function')).toBe(true);
+		expect(allValid(guard, vals)).toBe(true);
+	});
 });

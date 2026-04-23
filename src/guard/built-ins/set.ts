@@ -58,10 +58,11 @@ const setHelpers: SetHelpers<any> = {
 	}),
 	readonly: property(
 		transformer(target => ({
-			fn: (v: unknown): v is Readonly<Set<any>> => target(Object.freeze(v)),
+			fn: (v: unknown): v is Readonly<Set<any>> => target(v),
 			meta: {
 				name: `${target.meta.name}.readonly`,
 			},
+			transform: (v: any) => (v instanceof Set ? Object.freeze(v) : v),
 		})) as any
 	),
 };

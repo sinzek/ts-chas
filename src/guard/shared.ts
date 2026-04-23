@@ -1,6 +1,6 @@
 import { ok, err, type Result } from '../result/result.js';
 import { GlobalErrs, type InferErr } from '../tagged-errs.js';
-import { deepEqual, safeStringify } from '../utils.js';
+import { deepEqual, safeStringify, type DeepReadonly } from '../utils.js';
 import type { StandardSchemaV1 } from '../standard-schema.js';
 import type { Schema } from './schema.js';
 import { COERCERS } from './coercion.js';
@@ -114,6 +114,28 @@ export const JSON_SCHEMA = Symbol('jsonSchema');
 export type GuardErr = InferErr<typeof GlobalErrs.GuardErr>;
 
 /**
+ * Keys that can be used to pollute an object's prototype chain when assigned
+ * to plain objects via computed property access (e.g. `obj[userInput] = value`).
+ *
+ * Object and record guards reject input containing these as own keys by default.
+ * Chain `.allowProtoKeys` on an object/record guard to opt in to accepting them.
+ */
+export const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Returns `true` if `obj` has any own key in {@link FORBIDDEN_KEYS}.
+ *
+ * Only own string keys are considered (matches `Object.keys`), so this is safe
+ * to call on values that set `Object.prototype.__proto__` via the literal syntax.
+ */
+export function hasForbiddenKey(obj: object): boolean {
+	for (const k of Object.keys(obj)) {
+		if (FORBIDDEN_KEYS.has(k)) return true;
+	}
+	return false;
+}
+
+/**
  * Metadata attached to every guard via `.meta`.
  *
  * Contains the guard's identity, the full chain name, error configuration,
@@ -217,7 +239,30 @@ export type GuardMeta = {
  */
 export type InferGuard<T> = T extends (value: unknown) => value is infer U ? U : never;
 
-export type Brand<Tag extends string, Base> = Base & { readonly __brand: Tag };
+/**
+ * A unique symbol used to brand types.
+ */
+export declare const $brand: unique symbol;
+/**
+ * A branded type. Used to create new types that are distinct from their base type.
+ *
+ * @example
+ * ```ts
+ * type Email = Brand<'Email', string>;
+ * const example: Email = 'not-an-email'; // Error: Type 'string' is not assignable to type 'Email'.
+ * ```
+ */
+export type Brand<Tag extends string | number | symbol, Base> = Base & { readonly [$brand]: { [K in Tag]: true } };
+
+type AddBrand<T, Tag extends string | number | symbol> =
+	T extends Brand<infer T1, infer B1> ? Brand<T1 | Tag, B1> : Brand<Tag, T>;
+
+export type Unbrand<T, Tag extends string | number | symbol | undefined = undefined> =
+	T extends Brand<infer T1, infer B1> ? (Tag extends undefined ? B1 : Brand<Exclude<T1, Tag>, B1>) : T;
+export type IsBranded<T> = T extends Brand<any, any> ? true : false;
+export type HasBrand<T, Tag extends string | number | symbol> =
+	T extends Brand<infer T1, any> ? (Tag extends T1 ? true : false) : false;
+export type GetBrand<T> = T extends Brand<infer T1, any> ? T1 : never;
 
 // ---------------------------------------------------------------------------
 // Guard type
@@ -291,11 +336,17 @@ export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unkn
 	 */
 	error: (msg: string | ((ctx: { meta: GuardMeta; value: unknown }) => string)) => Guard<T, H>;
 	/**
-	 * Adds a brand to the guard.
+	 * Adds a brand to the guard. Drops type-specific helpers since the brand cannot be propogated through them at runtime.
 	 * @param tag The tag to add to the guard.
 	 * @returns A new guard with the brand.
 	 */
-	brand: <Tag extends string>(tag: Tag) => Guard<Brand<Tag, T>, H>;
+	brand: <Tag extends string>(tag: Tag) => Guard<AddBrand<T, Tag>>;
+	/**
+	 * Removes a brand from the guard.
+	 * @param tag The tag to remove from the guard. If not provided, all brands will be removed.
+	 * @returns A new guard with the brand removed.
+	 */
+	unbrand: <Tag extends string | number | symbol | undefined = undefined>(tag?: Tag) => Guard<Unbrand<T, Tag>>;
 	/**
 	 * Parses a value against the guard.
 	 * @param value The value to parse.
@@ -1002,6 +1053,7 @@ export interface ArrayHelpers<T> {
 	excludes: (item: T) => Guard<T[], ArrayHelpers<T>>;
 	/**
 	 * Wraps the array in `Object.freeze()` during validation, returning a readonly array when parsed. Since arrays are already readonly, this is not strictly necessary but is included for consistency with other collection guards.
+	 *
 	 * @example
 	 * ```ts
 	 * const guard = is.array(is.string).readonly;
@@ -1009,7 +1061,7 @@ export interface ArrayHelpers<T> {
 	 * guard.parse(['a', 'b']); // Err('Expected array of length 2')
 	 * ```
 	 */
-	readonly: Guard<Readonly<T[]>, ArrayHelpers<T>>;
+	readonly: Guard<DeepReadonly<T[]>, ArrayHelpers<T>>;
 }
 
 export const arrayHelpers: ArrayHelpers<any> = {
@@ -1075,6 +1127,8 @@ const ID_TO_JSON_TYPE: Record<string, string> = {
 	union: 'object',
 	intersection: 'object',
 	discriminatedUnion: 'object',
+	file: 'object',
+	File: 'object',
 };
 
 /**
@@ -1313,7 +1367,12 @@ const universalHelpers: Record<string, any> = {
 	})),
 
 	xor: transformer((target, other: Guard<any, Record<string, any>>) => ({
-		fn: (v: unknown): v is any => (target(v) || other(v)) && !(target(v) && other(v)), // one must pass, but not both
+		fn: (v: unknown): v is any => {
+			// Evaluate each predicate exactly once; short-circuit on unanimous rejection or match.
+			const a = target(v);
+			const b = other(v);
+			return a !== b; // exactly one passes
+		},
 		meta: { name: `${target.meta.name}.xor(${other.meta?.name ?? '?'})` },
 		helpers: {},
 		replaceHelpers: true,
@@ -1444,6 +1503,8 @@ const universalHelpers: Record<string, any> = {
 
 export function getType(v: any): string {
 	if (v === null) return 'null';
+	const t = typeof v;
+	if (t !== 'object') return t;
 	if (Array.isArray(v)) return 'array';
 	if (v instanceof Date) return 'date';
 	if (v instanceof RegExp) return 'regexp';
@@ -1454,11 +1515,7 @@ export function getType(v: any): string {
 	if (v instanceof WeakSet) return 'weakset';
 	if (v instanceof Error) return 'error';
 	if (v instanceof Promise) return 'promise';
-	if (v instanceof Symbol) return 'symbol';
-	if (v instanceof BigInt) return 'bigint';
-	if (v instanceof Function) return 'function';
-	if (v instanceof Object) return 'object';
-	return typeof v;
+	return 'object';
 }
 
 /**

@@ -75,7 +75,11 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 		return v;
 	},
 
-	/** Identical to object coercion (both are standard JSON parsing). */
+	/**
+	 * Delegates to `COERCERS.object` because a JSON string can decode to either
+	 * `{}` or `[]`; the downstream guard (object vs array) decides whether the
+	 * parsed value is acceptable.
+	 */
 	array: v => COERCERS['object']!(v),
 
 	/** Revives a stripped Result POJO back into a fully-featured Result class. */
@@ -86,6 +90,18 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 			}
 		} catch {
 			// Ignore ChasErrs thrown by revive if it's deeply malformed
+		}
+		return v;
+	},
+
+	/** Coerces string inputs to `URL` instances. */
+	url: v => {
+		if (typeof v === 'string') {
+			try {
+				return new URL(v);
+			} catch {
+				return v;
+			}
 		}
 		return v;
 	},

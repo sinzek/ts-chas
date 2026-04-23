@@ -345,7 +345,7 @@ const stringHelpers: StringHelpers = {
 	uppercase: ((v: string) => v === v.toUpperCase()) as any,
 	lowercase: ((v: string) => v === v.toLowerCase()) as any,
 	cuid: ((v: string) => /^c[a-z0-9]{24}$/.test(v)) as any,
-	cuid2: ((v: string) => /^[a-z][a-z0-9]{1,}$/.test(v)) as any,
+	cuid2: ((v: string) => /^[a-z][a-z0-9]{23,31}$/.test(v)) as any,
 	ulid: ((v: string) => /^[0-9A-HJKMNP-TV-Z]{26}$/.test(v)) as any,
 	ipv4: ((v: string) => {
 		const parts = v.split('.');
@@ -448,15 +448,36 @@ const stringHelpers: StringHelpers = {
 	base64: factory<[any?], (v: string) => boolean, StringHelpers>(
 		(options: { padding?: 'required' | 'optional' | 'forbidden' } = { padding: 'optional' }) =>
 			(v: string) => {
+				const padding = options.padding ?? 'optional';
 				if (!/^[A-Za-z0-9+/]+={0,2}$/.test(v)) return false;
 
-				const normalized = options.padding === 'forbidden' ? v.replace(/=+$/, '') : v;
+				const hasPadding = /=+$/.test(v);
+				const unpadded = v.replace(/=+$/, '');
+				const unpaddedLen = unpadded.length;
+				// Base64 length (ignoring padding) must be ≥ 2 and have remainder 0, 2, or 3 mod 4.
+				if (unpaddedLen < 2 || unpaddedLen % 4 === 1) return false;
+
+				if (padding === 'required') {
+					// Padded total length must be a multiple of 4; reject inputs that are already a
+					// multiple of 4 without padding (they decoded a whole block — valid as optional,
+					// but not as 'required' since we expect explicit trailing '=' when the final
+					// block is short).
+					if (v.length % 4 !== 0) return false;
+					const needsPadding = unpaddedLen % 4 !== 0;
+					if (needsPadding && !hasPadding) return false;
+					if (!needsPadding && hasPadding) return false;
+				} else if (padding === 'forbidden') {
+					if (hasPadding) return false;
+				} else {
+					// optional: if padding is present, its length must complete a 4-char block.
+					if (hasPadding && v.length % 4 !== 0) return false;
+				}
 
 				try {
-					const decoded = Buffer.from(normalized, 'base64');
-					const reencoded = decoded.toString('base64');
-
-					return normalized.replace(/=+$/, '') === reencoded.replace(/=+$/, '');
+					const decoded = ENC.base64.decode(unpadded + '='.repeat((4 - (unpaddedLen % 4)) % 4));
+					// Re-encode and compare against the unpadded form to catch bogus chars.
+					const reencoded = ENC.base64.encode(decoded).replace(/=+$/, '');
+					return unpadded === reencoded;
 				} catch {
 					return false;
 				}
@@ -703,6 +724,11 @@ const stringHelpers: StringHelpers = {
 					time: transformer<string, string, [{ precision?: number }?], IsoHelpers>(
 						(target, options?: { precision?: number }) => {
 							const p = options?.precision;
+							if (p !== undefined && (!Number.isInteger(p) || p < -1)) {
+								throw new RangeError(
+									`is.string.iso.time: precision must be an integer >= -1, got ${p}`
+								);
+							}
 							let re: RegExp;
 							if (p === undefined) {
 								re = /^\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
@@ -730,6 +756,11 @@ const stringHelpers: StringHelpers = {
 						IsoHelpers
 					>((target, options?: { offset?: boolean; local?: boolean; precision?: number }) => {
 						const p = options?.precision;
+						if (p !== undefined && (!Number.isInteger(p) || p < -1)) {
+							throw new RangeError(
+								`is.string.iso.datetime: precision must be an integer >= -1, got ${p}`
+							);
+						}
 						const allowOffset = options?.offset !== false;
 						const allowLocal = options?.local === true;
 
@@ -923,7 +954,7 @@ const stringHelpers: StringHelpers = {
 (stringHelpers.ipv6 as any)[JSON_SCHEMA] = () => ({ format: 'ipv6' });
 (stringHelpers.ulid as any)[JSON_SCHEMA] = () => ({ format: 'ulid' });
 (stringHelpers.cuid as any)[JSON_SCHEMA] = () => ({ pattern: '^c[a-z0-9]{24}$' });
-(stringHelpers.cuid2 as any)[JSON_SCHEMA] = () => ({ pattern: '^[a-z][a-z0-9]{1,}$' });
+(stringHelpers.cuid2 as any)[JSON_SCHEMA] = () => ({ pattern: '^[a-z][a-z0-9]{23,31}$' });
 (stringHelpers.cidrv4 as any)[JSON_SCHEMA] = () => ({ _format: 'cidrv4' });
 (stringHelpers.cidrv6 as any)[JSON_SCHEMA] = () => ({ _format: 'cidrv6' });
 (stringHelpers.lowercase as any)[JSON_SCHEMA] = () => ({ pattern: '^[^A-Z]*$' });

@@ -1,5 +1,5 @@
 import { makeGuard, type Guard, type InferGuard, type GuardErr, terminal } from '../shared.js';
-import { AggregateGuardError } from '../schema.js';
+import { AggregateGuardErr } from '../schema.js';
 import { ok, err, type Result, ResultAsync } from '../../result/result.js';
 import { GlobalErrs } from '../../tagged-errs.js';
 
@@ -33,7 +33,7 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	 * When the resulting function is called, it will validate its inputs against
 	 * the `input` guards and its return value against the `output` guard.
 	 *
-	 * @throws {AggregateGuardError} If validation fails.
+	 * @throws {AggregateGuardErr} If validation fails.
 	 */
 	impl: <
 		F extends (
@@ -47,7 +47,7 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	 * Similar to `.impl`, but handles async functions.
 	 * Validates inputs synchronously, then validates the resolved return value.
 	 *
-	 * @throws {AggregateGuardError} If validation fails.
+	 * @throws {AggregateGuardErr} If validation fails.
 	 */
 	implAsync: <
 		F extends (
@@ -58,7 +58,7 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	) => (...args: Parameters<F>) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
 
 	/**
-	 * Similar to `.impl`, but instead of throwing an `AggregateGuardError`, returns a `Result<T, AggregateGuardError>`.
+	 * Similar to `.impl`, but instead of throwing an `AggregateGuardErr`, returns a `Result<T, AggregateGuardErr>`.
 	 */
 	implResult: <
 		F extends (
@@ -68,10 +68,10 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 		fn: F
 	) => (
 		...args: Parameters<F>
-	) => Result<Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>, AggregateGuardError>;
+	) => Result<Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>, AggregateGuardErr>;
 
 	/**
-	 * Similar to `.implAsync`, but returns a `ResultAsync<T, AggregateGuardError>` instead of throwing.
+	 * Similar to `.implAsync`, but returns a `ResultAsync<T, AggregateGuardErr>` instead of throwing.
 	 */
 	implResultAsync: <
 		F extends (
@@ -81,109 +81,75 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 		fn: F
 	) => (
 		...args: Parameters<F>
-	) => ResultAsync<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>, AggregateGuardError>;
+	) => ResultAsync<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>, AggregateGuardErr>;
+}
+
+function validateInputs(target: any, args: any[]): void {
+	const { inputGuards }: { inputGuards: Guard<any>[] } = target.meta;
+	const errs: GuardErr[] = [];
+	for (let i = 0; i < inputGuards.length; i++) {
+		const result = inputGuards[i]?.parse(args[i]);
+		if (result && result.isErr()) {
+			const error = result.error;
+			errs.push(
+				GlobalErrs.GuardErr({
+					...error,
+					message: error.message,
+					path: [`args[${i}]`, ...error.path],
+				})
+			);
+		}
+	}
+	if (errs.length > 0) {
+		throw new AggregateGuardErr(target.meta.name, errs);
+	}
+}
+
+function validateOutput(target: any, result: any): any {
+	const { outputGuard }: { outputGuard?: Guard<any> } = target.meta;
+	if (!outputGuard) return result;
+	const outRes = outputGuard.parse(result);
+	if (outRes.isErr()) {
+		const error = outRes.error;
+		throw new AggregateGuardErr(target.meta.name, [
+			GlobalErrs.GuardErr({
+				...error,
+				message: error.message,
+				path: ['return', ...error.path],
+			}),
+		]);
+	}
+	return outRes.value;
+}
+
+function makeImpl(target: any, origFn: any) {
+	return (...args: any[]) => {
+		validateInputs(target, args);
+		const result = origFn(...args);
+		return validateOutput(target, result);
+	};
+}
+
+function makeImplAsync(target: any, origFn: any) {
+	return async (...args: any[]) => {
+		validateInputs(target, args);
+		const result = await origFn(...args);
+		return validateOutput(target, result);
+	};
 }
 
 const functionHelpers: any = {
-	impl: terminal((target, origFn: any) => {
-		const { inputGuards, outputGuard }: { inputGuards: Guard<any>[]; outputGuard?: Guard<any> } = target.meta;
-		return (...args: any[]) => {
-			const errs: GuardErr[] = [];
-			// 1. Validate inputs
-			for (let i = 0; i < inputGuards.length; i++) {
-				const result = inputGuards[i]?.parse(args[i]);
-				if (result && result.isErr()) {
-					const error = result.error;
-					errs.push(
-						GlobalErrs.GuardErr({
-							...error,
-							message: error.message,
-							path: [`args[${i}]`, ...error.path],
-						})
-					);
-				}
-			}
+	impl: terminal((target, origFn: any) => makeImpl(target, origFn)),
 
-			if (errs.length > 0) {
-				throw new AggregateGuardError(target.meta.name, errs);
-			}
-
-			// 2. Call original
-			const result = origFn(...args);
-
-			// 3. Validate output
-			if (outputGuard) {
-				const outRes = outputGuard.parse(result);
-				if (outRes.isErr()) {
-					const error = outRes.error;
-					throw new AggregateGuardError(target.meta.name, [
-						GlobalErrs.GuardErr({
-							...error,
-							message: error.message,
-							path: ['return', ...error.path],
-						}),
-					]);
-				}
-				return outRes.value;
-			}
-
-			return result;
-		};
-	}),
-
-	implAsync: terminal((target, origFn: any) => {
-		const { inputGuards, outputGuard } = target.meta;
-		return async (...args: any[]) => {
-			const errs: GuardErr[] = [];
-			// 1. Validate inputs (sync)
-			for (let i = 0; i < inputGuards.length; i++) {
-				const result = inputGuards[i]?.parse(args[i]);
-				if (result && result.isErr()) {
-					const error = result.error;
-					errs.push(
-						GlobalErrs.GuardErr({
-							...error,
-							message: error.message,
-							path: [`args[${i}]`, ...error.path],
-						})
-					);
-				}
-			}
-
-			if (errs.length > 0) {
-				throw new AggregateGuardError(target.meta.name, errs);
-			}
-
-			// 2. Call original (await)
-			const result = await origFn(...args);
-
-			// 3. Validate output
-			if (outputGuard) {
-				const outRes = outputGuard.parse(result);
-				if (outRes.isErr()) {
-					const error = outRes.error;
-					throw new AggregateGuardError(target.meta.name, [
-						GlobalErrs.GuardErr({
-							...error,
-							message: error.message,
-							path: ['return', ...error.path],
-						}),
-					]);
-				}
-				return outRes.value;
-			}
-
-			return result;
-		};
-	}),
+	implAsync: terminal((target, origFn: any) => makeImplAsync(target, origFn)),
 
 	implResult: terminal((target, origFn: any) => {
+		const wrapped = makeImpl(target, origFn);
 		return (...args: any[]) => {
 			try {
-				const result = functionHelpers.impl(target, origFn)(...args);
-				return ok(result);
+				return ok(wrapped(...args));
 			} catch (e: any) {
-				if (e instanceof AggregateGuardError) {
+				if (e instanceof AggregateGuardErr) {
 					return err(e);
 				}
 				throw e;
@@ -192,15 +158,13 @@ const functionHelpers: any = {
 	}),
 
 	implResultAsync: terminal((target, origFn: any) => {
+		const wrapped = makeImplAsync(target, origFn);
 		return (...args: any[]) => {
 			return ResultAsync.from(
-				async () => {
-					const result = await functionHelpers.implAsync(target, origFn)(...args);
-					return ok(result);
-				},
-				(e: any) => (e instanceof AggregateGuardError ? e : undefined)
+				async () => ok(await wrapped(...args)),
+				(e: any) => (e instanceof AggregateGuardErr ? e : undefined)
 			).mapErr(e => {
-				if (e instanceof AggregateGuardError) return e;
+				if (e instanceof AggregateGuardErr) return e;
 				throw e;
 			});
 		};

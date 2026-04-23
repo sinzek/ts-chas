@@ -38,10 +38,11 @@ const mapHelpers: MapHelpers<any, any> = {
 	}),
 	readonly: property(
 		transformer(target => ({
-			fn: (v: unknown): v is Readonly<Map<any, any>> => target(Object.freeze(v)),
+			fn: (v: unknown): v is Readonly<Map<any, any>> => target(v),
 			meta: {
 				name: `${target.meta.name}.readonly`,
 			},
+			transform: (v: any) => (v instanceof Map ? Object.freeze(v) : v),
 		})) as any
 	),
 };

@@ -1,8 +1,8 @@
-import { type Guard, type InferGuard, makeGuard } from '../shared.js';
+import { type Guard, type InferGuard, hasForbiddenKey, makeGuard } from '../shared.js';
 import { objectHelpers, type ObjectHelpers } from './shared.js';
 
 export interface ObjectGuardFactory {
-	(): ObjectGuard<object>;
+	(): ObjectGuard;
 	<S extends Record<string, Guard<any, Record<string, any>>>>(
 		schema: S
 	): ObjectGuard<{ [K in keyof S]: InferGuard<S[K]> }>;
@@ -14,7 +14,8 @@ export const ObjectGuardFactory: ObjectGuardFactory = (...args: any[]) => {
 	const schema: Record<string, Guard<any, Record<string, any>>> | undefined = args[0];
 	if (schema === undefined) {
 		return makeGuard(
-			(v: unknown): v is object => v != null && typeof v === 'object' && !Array.isArray(v),
+			(v: unknown): v is object =>
+				v != null && typeof v === 'object' && !Array.isArray(v) && !hasForbiddenKey(v),
 			{ name: 'object', id: 'object' },
 			objectHelpers as any
 		);
@@ -25,6 +26,7 @@ export const ObjectGuardFactory: ObjectGuardFactory = (...args: any[]) => {
 	return makeGuard(
 		(v: unknown): v is Record<string, unknown> => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+			if (hasForbiddenKey(v)) return false;
 			const obj = v as Record<string, unknown>;
 			for (const key of Object.keys(schema)) {
 				if (!schema[key]!(obj[key])) return false;

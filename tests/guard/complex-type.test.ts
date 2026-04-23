@@ -350,10 +350,7 @@ describe('Complex Nested Guard Validation', () => {
 
 	it('should handle tuple with coerced elements via schema', () => {
 		// Tuple transforms require defineSchema (recursive validation applies transforms per element)
-		const schema = defineSchema(
-			'Tuple',
-			is.tuple([is.number.coerce, is.string.trim(), is.boolean.coerce])
-		);
+		const schema = defineSchema('Tuple', is.tuple([is.number.coerce, is.string.trim(), is.boolean.coerce]));
 
 		const result = schema.parse(['42', '  hello  ', 'yes']);
 		expect(result.isOk()).toBe(true);
@@ -361,10 +358,7 @@ describe('Complex Nested Guard Validation', () => {
 	});
 
 	it('should handle tuple with rest and transforms via schema', () => {
-		const schema = defineSchema(
-			'TupleRest',
-			is.tuple([is.string.trim(), is.number.coerce], is.boolean.coerce)
-		);
+		const schema = defineSchema('TupleRest', is.tuple([is.string.trim(), is.number.coerce], is.boolean.coerce));
 
 		const result = schema.parse(['  header  ', '100', '1', 'no', 'true']);
 		expect(result.isOk()).toBe(true);
@@ -630,7 +624,7 @@ describe('Complex Schema Validation', () => {
 		expect(result.unwrapErr().length).toBeGreaterThanOrEqual(2);
 	});
 
-	it('should handle schema assert throwing AggregateGuardError', () => {
+	it('should handle schema assert throwing AggregateGuardErr', () => {
 		const schema = defineSchema(
 			'Point',
 			is.object({
@@ -812,9 +806,11 @@ describe('Complex Guard + Transform Interactions', () => {
 	});
 
 	it('should handle object catchall for extra keys with transforms', () => {
-		const guard = is.object({
-			name: is.string.trim(),
-		}).catchall(is.string);
+		const guard = is
+			.object({
+				name: is.string.trim(),
+			})
+			.catchall(is.string);
 
 		// Known keys get validated + transformed, extra keys validated by catchall
 		const result = guard.parse({ name: '  Alice  ', extra: 'kept' });

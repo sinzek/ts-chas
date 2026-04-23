@@ -99,18 +99,29 @@ function guardToPattern(guard: Guard<any>): string {
 			if (values instanceof Set) {
 				return [...values].map(v => escapeRegex(String(v))).join('|');
 			}
-			return '.+?';
+			return '[\\s\\S]+?';
 		}
 		case 'enum': {
 			const values = guard.meta.values;
 			if (values instanceof Set) {
 				return [...values].map(v => escapeRegex(String(v))).join('|');
 			}
-			return '.+?';
+			return '[\\s\\S]+?';
 		}
-		case 'string':
+		case 'string': {
+			// If the string guard has a JSON Schema pattern (e.g. .email, .uuid),
+			// use that to constrain the capture; the guard re-validates the
+			// captured substring so false positives still fail.
+			const schemaPattern = guard.meta.jsonSchema?.pattern;
+			if (typeof schemaPattern === 'string' && schemaPattern.length > 0) {
+				// Strip anchors since we're embedding inside a larger regex.
+				const stripped = schemaPattern.replace(/^\^/, '').replace(/\$$/, '');
+				return stripped;
+			}
+			return '[\\s\\S]*?';
+		}
 		default:
-			return '.*?';
+			return '[\\s\\S]*?';
 	}
 }
 

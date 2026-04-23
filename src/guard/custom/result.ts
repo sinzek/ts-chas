@@ -22,19 +22,9 @@
  * ```
  */
 
-import { type Result } from '../../result/result.js';
+import { isResult, type Result } from '../../result/result.js';
 import type { Err, Ok } from '../../result/shared.js';
 import { makeGuard, transformer, type Guard, type InferGuard } from '../shared.js';
-
-function isResultValue(v: unknown): v is Result<unknown, unknown> {
-	return (
-		v !== null &&
-		typeof v === 'object' &&
-		'ok' in v &&
-		typeof (v as any).isOk === 'function' &&
-		typeof (v as any).isErr === 'function'
-	);
-}
 
 export interface ResultHelpers<T = unknown, E = unknown> {
 	/**
@@ -110,7 +100,7 @@ export const ResultGuardFactory: ResultGuardFactory = (
 ) =>
 	makeGuard(
 		<T, E>(v: unknown): v is Result<T, E> => {
-			if (!isResultValue(v)) return false;
+			if (!isResult(v)) return false;
 			if (okGuard && v.isOk() && !okGuard(v.value)) return false;
 			if (errGuard && v.isErr() && !errGuard(v.error)) return false;
 			return true;

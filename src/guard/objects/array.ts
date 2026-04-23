@@ -2,7 +2,7 @@ import { makeGuard, arrayHelpers, type ArrayHelpers, type Guard, type InferGuard
 
 export type { ArrayHelpers };
 
-export type ArrayGuard<G extends Guard<any, Record<string, any>>[]> = Guard<
+export type ArrayGuard<G extends any[]> = Guard<
 	G extends [] ? unknown[] : InferGuard<G[number]>[],
 	ArrayHelpers<G extends [] ? unknown : InferGuard<G[number]>>
 >;

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { is } from '../../src/guard/index.js';
+import { defineErrs } from '../../src/tagged-errs.js';
+import { some } from '../../src/option.js';
+import { ok } from '../../src/result/result.js';
 
 describe('is.object (v2)', () => {
 	it('basic object validation', () => {
@@ -406,6 +409,144 @@ describe('is.object (v2)', () => {
 				const narrowed: Readonly<{ a: number; b?: unknown }> = value;
 				expect(narrowed).toEqual({ a: 1, b: 2 });
 			}
+		});
+	});
+
+	describe('all guards', () => {
+		it('should work with all other top-level guards', () => {
+			const AppErr = defineErrs({
+				example: (value: string) => ({ value }),
+			});
+
+			const guard = is.object({
+				a: is.string,
+				b: is.number,
+				c: is.boolean,
+				d: is.date,
+				e: is.enum(['a', 'b', 'c']),
+				f: is.literal('a', 'b', 'c'),
+				g: is.record(is.string, is.number),
+				h: is.array(is.number),
+				i: is.tuple([is.string, is.number]),
+				j: is.union(is.string, is.number),
+				k: is.intersection(is.object({ a: is.string }), is.object({ b: is.number })),
+				l: is.xor(is.string, is.number),
+				m: is.promise,
+				o: is.result(is.string, is.number),
+				p: is.option(is.string),
+				q: is.tagged(AppErr.example),
+			});
+
+			expect(
+				guard({
+					a: 'hello',
+					b: 1,
+					c: true,
+					d: new Date(),
+					e: 'a',
+					f: 'a',
+					g: { a: 1 },
+					h: [1],
+					i: ['a', 1],
+					j: 'a',
+					k: { a: 'hello', b: 1 },
+					l: 'hello',
+					m: Promise.resolve('a'),
+					n: async () => 'a',
+					o: ok('a'),
+					p: some('a'),
+					q: AppErr.example('hello'),
+				})
+			).toBe(true);
+		});
+	});
+
+	describe('prototype-pollution safety', () => {
+		// JSON.parse puts __proto__ on the parsed object as an own data property,
+		// which is the common attacker vector (not the `{__proto__: ...}` literal
+		// syntax, which mutates the prototype instead of creating an own key).
+		const withProtoOwn = (payload: object) =>
+			JSON.parse(`{"a":"x","__proto__":${JSON.stringify(payload)}}`) as Record<string, unknown>;
+
+		it('is.object() bare guard rejects own __proto__', () => {
+			expect(is.object()(withProtoOwn({ polluted: true }))).toBe(false);
+			expect(is.object()({ constructor: 'x' })).toBe(false);
+			expect(is.object()({ prototype: 'x' })).toBe(false);
+			expect(is.object()({ a: 1 })).toBe(true);
+		});
+
+		it('is.object(schema) rejects own __proto__/constructor/prototype', () => {
+			const guard = is.object({ a: is.string });
+			expect(guard(withProtoOwn({ polluted: true }))).toBe(false);
+			expect(guard({ a: 'x', constructor: 'y' })).toBe(false);
+			expect(guard({ a: 'x', prototype: 'y' })).toBe(false);
+			expect(guard({ a: 'x' })).toBe(true);
+		});
+
+		it('is.record rejects forbidden keys in both open-ended and exhaustive modes', () => {
+			const open = is.record(is.string, is.number);
+			expect(open(withProtoOwn({ polluted: true }))).toBe(false);
+			expect(open({ constructor: 1 })).toBe(false);
+			expect(open({ a: 1, b: 2 })).toBe(true);
+
+			const exhaustive = is.record(is.enum(['a', 'b'] as const), is.number);
+			expect(exhaustive({ a: 1, b: 2 })).toBe(true);
+			// Would already fail the exhaustive check, but confirm forbidden-key path too.
+			expect(exhaustive(withProtoOwn({ polluted: true }))).toBe(false);
+		});
+
+		it('.allowProtoKeys accepts __proto__ as an own key', () => {
+			const guard = is.object({ a: is.string }).allowProtoKeys;
+			const input = withProtoOwn({ polluted: true });
+			expect(guard(input)).toBe(true);
+			// Crucially, the proxy/walker should not have mutated Object.prototype.
+			expect(({} as any).polluted).toBeUndefined();
+
+			const rec = is.record(is.string, is.number).allowProtoKeys;
+			expect(rec(JSON.parse(`{"a":1,"__proto__":{"polluted":true}}`))).toBe(true);
+		});
+
+		it('.allowProtoKeys preserves strict/catchall flags from parent meta', () => {
+			const guard = is.object({ a: is.string }).strict.allowProtoKeys;
+			// strict still rejects unknown non-forbidden keys
+			expect(guard({ a: 'x', extra: 1 })).toBe(false);
+			expect(guard({ a: 'x' })).toBe(true);
+		});
+
+		it('propagates allowProtoKeys through partial/pick/omit/extend/required', () => {
+			const base = is.object({ a: is.string, b: is.number }).allowProtoKeys;
+			const proto = withProtoOwn({ polluted: true });
+
+			expect(base.partial()({ ...proto, a: 'x' })).toBe(true);
+			expect(base.pick(['a'])({ ...proto, a: 'x' })).toBe(true);
+			expect(base.omit(['b'])({ ...proto, a: 'x' })).toBe(true);
+			expect(base.extend({ c: is.boolean })({ ...proto, a: 'x', b: 1, c: true })).toBe(true);
+
+			// Without allowProtoKeys, the same chain rejects:
+			const strict = is.object({ a: is.string, b: is.number });
+			expect(strict.partial()({ ...proto, a: 'x' })).toBe(false);
+			expect(strict.pick(['a'])({ ...proto, a: 'x' })).toBe(false);
+			expect(strict.omit(['b'])({ ...proto, a: 'x' })).toBe(false);
+			expect(strict.extend({ c: is.boolean })({ ...proto, a: 'x', b: 1, c: true })).toBe(false);
+		});
+
+		it('pick transform does not trigger __proto__ setter on fresh object', () => {
+			// Even with .allowProtoKeys, picking "__proto__" must not mutate the result's prototype.
+			const guard = is.object({} as any).allowProtoKeys.pick(['__proto__']);
+			const input = JSON.parse(`{"__proto__":{"polluted":true}}`);
+			// Parse to exercise the transform path.
+			const parsed = guard.parse(input);
+			expect(parsed.isOk()).toBe(true);
+			if (parsed.isOk()) {
+				expect(Object.getPrototypeOf(parsed.value)).toBe(Object.prototype);
+			}
+		});
+
+		it('can be spread into another object guard', () => {
+			const base = is.object({ a: is.string });
+			const guard = is.object({ ...base.meta.shape, b: is.number });
+			expect(guard.strict({ a: 'hello', b: 1 })).toBe(true);
+			expect(guard.strict({ a: 'hello', b: 1, c: 2 })).toBe(false);
 		});
 	});
 });

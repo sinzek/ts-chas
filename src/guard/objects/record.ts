@@ -1,4 +1,4 @@
-import { makeGuard, type Guard } from '../shared.js';
+import { hasForbiddenKey, makeGuard, type Guard } from '../shared.js';
 import { type ObjectHelpers, objectHelpers } from './shared.js';
 
 export type RecordGuard<K extends string | number | symbol, V> = Guard<Record<K, V>, ObjectHelpers<Record<K, V>>>;
@@ -56,9 +56,17 @@ export const RecordGuardFactory: RecordGuardFactory = <K extends string | number
 ) => {
 	const requiredKeys: Set<any> | undefined = keyGuard.meta.values instanceof Set ? keyGuard.meta.values : undefined;
 
+	// When the key guard has a finite set of values, expose a `shape` so that
+	// object helpers (partial, pick, omit, extend, keyof, etc.) can operate as
+	// if this were an explicit `is.object({ a: valGuard, b: valGuard, ... })`.
+	const shape: Record<string, Guard<any>> | undefined = requiredKeys
+		? Object.fromEntries([...requiredKeys].map(k => [String(k), valGuard]))
+		: undefined;
+
 	return makeGuard(
 		(v: unknown): v is Record<K, V> => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+			if (hasForbiddenKey(v)) return false;
 			const obj = v as Record<string, unknown>;
 			const keys = Object.keys(obj);
 
@@ -78,7 +86,13 @@ export const RecordGuardFactory: RecordGuardFactory = <K extends string | number
 			}
 			return true;
 		},
-		{ name: `record<${keyGuard.meta.name}, ${valGuard.meta.name}>`, id: 'record', keyGuard, valueGuard: valGuard },
+		{
+			name: `record<${keyGuard.meta.name}, ${valGuard.meta.name}>`,
+			id: 'record',
+			keyGuard,
+			valueGuard: valGuard,
+			...(shape && { shape }),
+		},
 		objectHelpers as any
 	);
 };

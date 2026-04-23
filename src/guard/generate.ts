@@ -66,6 +66,18 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 		return fc.constant(undefined);
 	}
 
+	if (meta.id === 'nullable') {
+		return fc.oneof(fc.constant(null), buildArbitrary(meta['inner'] as Guard<any>, fc));
+	}
+
+	if (meta.id === 'optional') {
+		return fc.oneof(fc.constant(undefined), buildArbitrary(meta['inner'] as Guard<any>, fc));
+	}
+
+	if (meta.id === 'nullish') {
+		return fc.oneof(fc.constant(null), fc.constant(undefined), buildArbitrary(meta['inner'] as Guard<any>, fc));
+	}
+
 	if (meta.id === 'date' || meta.id === 'Date') {
 		// Default to the safe range so extreme dates never cause toISOString() to throw.
 		// Explicit minimum/maximum from helper annotations (e.g. after(), before()) override these.
@@ -75,7 +87,7 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 		};
 		if (js.minimum !== undefined) constraints.min = new Date(js.minimum);
 		if (js.maximum !== undefined) constraints.max = new Date(js.maximum);
-		let dateArb = fc.date(constraints);
+		let dateArb = safeDateArb(fc, constraints);
 		// Apply post-generation filters for semantic date constraints
 		if (js._dateFilter === 'weekend') dateArb = dateArb.filter((d: Date) => d.getDay() === 0 || d.getDay() === 6);
 		if (js._dateFilter === 'weekday') dateArb = dateArb.filter((d: Date) => d.getDay() > 0 && d.getDay() < 6);
@@ -180,6 +192,57 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 	// These are handled inline above via js._nullable / js._optional.
 	// If we reach here for 'lazy', 'custom', etc. fall back to fc.anything().
 
+	if (meta.id === 'formData') {
+		const constraints: import('fast-check').ArrayConstraints = {};
+		if (js.minProperties !== undefined) constraints.minLength = js.minProperties;
+		if (js.maxProperties !== undefined) constraints.maxLength = js.maxProperties;
+		const requiredKeys = (js._formDataHasKeys as string[]) ?? [];
+		return fc
+			.array(fc.tuple(fc.string({ minLength: 1, maxLength: 8 }), fc.string({ maxLength: 16 })), constraints)
+			.map((entries: [string, string][]) => {
+				const fd = new FormData();
+				entries.forEach(([k, v]) => fd.append(k, v));
+				requiredKeys.forEach(k => {
+					if (!fd.has(k)) fd.append(k, 'req_val');
+				});
+				return fd;
+			});
+	}
+
+	if (meta.id === 'uint8Array' || meta.id === 'buffer' || meta.id === 'arrayBuffer' || meta.id === 'dataView') {
+		const constraints: import('fast-check').IntArrayConstraints = {};
+		if (js.minLength !== undefined) constraints.minLength = js.minLength;
+		if (js.maxLength !== undefined) constraints.maxLength = js.maxLength;
+		let arb: any = fc.uint8Array(constraints);
+		if (meta.id === 'buffer') arb = arb.map((a: Uint8Array) => (typeof Buffer !== 'undefined' ? Buffer.from(a) : a));
+		if (meta.id === 'arrayBuffer') arb = arb.map((a: Uint8Array) => a.buffer);
+		if (meta.id === 'dataView') arb = arb.map((a: Uint8Array) => new DataView(a.buffer));
+		return arb;
+	}
+
+	if (meta.id === 'iterable' || meta.id === 'asyncIterable' || meta.id === 'generator' || meta.id === 'asyncGenerator') {
+		return fc.array(fc.anything(), { maxLength: 10 }).map((arr: any[]) => {
+			if (meta.id === 'iterable') {
+				return { [Symbol.iterator]: () => arr[Symbol.iterator]() };
+			}
+			if (meta.id === 'asyncIterable') {
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield* arr;
+					},
+				};
+			}
+			if (meta.id === 'generator') {
+				return (function* () {
+					yield* arr;
+				})();
+			}
+			return (async function* () {
+				yield* arr;
+			})();
+		});
+	}
+
 	return fc.anything();
 }
 
@@ -189,9 +252,14 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 
 /** Safe date range: years 1000–9000 always produce standard 4-digit-year ISO strings. */
 const SAFE_DATE_CONSTRAINTS = {
-	min: new Date('1000-01-01T00:00:00.000Z'),
-	max: new Date('9000-12-31T23:59:59.999Z'),
+	min: new Date(Date.UTC(1000, 0, 1)),
+	max: new Date(Date.UTC(9000, 11, 31, 23, 59, 59, 999)),
 };
+
+/** Produces a date arbitrary that is guaranteed to have a valid toISOString() result. */
+function safeDateArb(fc: typeof import('fast-check'), constraints?: { min?: Date; max?: Date }) {
+	return fc.date(constraints ?? SAFE_DATE_CONSTRAINTS).filter((d: Date) => !isNaN(d.getTime()));
+}
 
 function hostnameArbitrary(fc: typeof import('fast-check')): any {
 	const ALPHA = 'abcdefghijklmnopqrstuvwxyz';
@@ -246,11 +314,10 @@ function stringArbitrary(js: any, fc: typeof import('fast-check')): any {
 			if (js._isoDatetime) return isoDatetimeArbitrary(js, fc);
 			// Constrain to years 1000–9000 so toISOString() always produces the
 			// standard 4-digit-year format rather than the extended ±YYYYYY form.
-			return fc
-				.date({ min: new Date('1000-01-01T00:00:00.000Z'), max: new Date('9000-12-31T23:59:59.999Z') })
+			return safeDateArb(fc)
 				.map((d: Date) => d.toISOString());
 		case 'date':
-			return fc.date(SAFE_DATE_CONSTRAINTS).map((d: Date) => d.toISOString().split('T')[0]!);
+			return safeDateArb(fc).map((d: Date) => d.toISOString().split('T')[0]!);
 	}
 
 	// Custom _format markers — more specific than generic pattern/length constraints
@@ -414,7 +481,7 @@ function isoDatetimeArbitrary(js: any, fc: typeof import('fast-check')): any {
 	const allowOffset: boolean = js._isoOffset !== false; // default true
 	const precision: number | undefined = js._isoPrecision;
 
-	return fc.date(SAFE_DATE_CONSTRAINTS).map((d: Date) => {
+	return safeDateArb(fc).map((d: Date) => {
 		const datePart = d.toISOString().split('T')[0]!; // YYYY-MM-DD
 
 		const h = String(d.getUTCHours()).padStart(2, '0');

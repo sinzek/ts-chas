@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { is } from '../../src/guard/index.js';
 
+enum Direction {
+	Up,
+	Down,
+}
+
 describe('is.enum (v2)', () => {
 	it('validates from array', () => {
 		const guard = is.enum(['red', 'green', 'blue']);
@@ -10,7 +15,7 @@ describe('is.enum (v2)', () => {
 	});
 
 	it('validates from plain object (using keys for name)', () => {
-		const Fish = { Salmon: 0, Tuna: 1 };
+		const Fish = { Salmon: 0, Tuna: 1 } as const;
 		const guard = is.enum(Fish);
 		expect(guard(0)).toBe(true);
 		expect(guard(1)).toBe(true);
@@ -19,10 +24,6 @@ describe('is.enum (v2)', () => {
 	});
 
 	it('validates from TS numeric enum (filtering reverse mapping)', () => {
-		enum Direction {
-			Up,
-			Down,
-		}
 		// Direction = { Up: 0, Down: 1, 0: 'Up', 1: 'Down' }
 		const guard = is.enum(Direction);
 		expect(guard(0)).toBe(true);
@@ -57,5 +58,16 @@ describe('is.enum (v2)', () => {
 			expect(guard('c')).toBe(false);
 			expect(guard.meta.name).toBe('enum<"a" | "b" | "c">.extract("a", "b")');
 		});
+	});
+
+	it('works with objects', () => {
+		const example = is.enum([1, 2, 3]);
+		const example2 = is.object({
+			example: is.enum([1, 2, 3]),
+			example2: is.enum(Direction),
+			example3: is.enum({ a: 1, b: 2 }),
+		});
+		expect(example2({ example: 1, example2: Direction.Up, example3: 1 })).toBe(true);
+		expect(example2({ example: 1, example2: 0, example3: 2 })).toBe(true);
 	});
 });

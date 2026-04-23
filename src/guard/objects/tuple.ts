@@ -1,8 +1,10 @@
 import { makeGuard, type Guard, type InferGuard, arrayHelpers } from '../shared.js';
 
-export type TupleGuard<G extends readonly Guard<any, Record<string, any>>[]> = Guard<
-	{ [K in keyof G]: InferGuard<G[K]> },
-	TupleHelpers<{ [K in keyof G]: InferGuard<G[K]> }>
+type Mutable<T extends readonly any[]> = [...T];
+
+export type TupleGuard<G extends readonly any[]> = Guard<
+	Mutable<{ [K in keyof G]: InferGuard<G[K]> }>,
+	TupleHelpers<Mutable<{ [K in keyof G]: InferGuard<G[K]> }>>
 >;
 
 export interface TupleGuardFactory {

@@ -75,9 +75,8 @@ export type ResultPartialErrHandlers<E, U = any> = Partial<TagHandlers<E, U>> & 
  * Extracts the union of all return types from a handlers object.
  * Handles optional properties gracefully (e.g. `err?: never`).
  */
-export type HandlerReturnType<H> = H extends Record<string, ((...args: any) => any) | undefined>
-	? ReturnType<Exclude<H[keyof H], undefined>>
-	: never;
+export type HandlerReturnType<H> =
+	H extends Record<string, ((...args: any) => any) | undefined> ? ReturnType<Exclude<H[keyof H], undefined>> : never;
 
 /**
  * The set of keys allowed in a `matchTag` call for error union E.
@@ -98,6 +97,20 @@ export type AllowedMatchTagPartialKeys<E> = 'ok' | Extract<E, { _tag: string }>[
 export type NoExtraKeys<H, Allowed extends string | number | symbol> = {
 	[K in keyof H as K extends Allowed ? never : K]: never;
 };
+
+/** Recursively strips `readonly` from all keys at every nesting level (up to 4 levels deep). */
+export type DeepWritable<T, D extends any[] = []> = D['length'] extends 4
+	? T
+	: T extends object
+		? { -readonly [K in keyof T]: DeepWritable<T[K], [...D, 0]> }
+		: T;
+
+/** Recursively adds `readonly` to all keys at every nesting level (up to 4 levels deep). */
+export type DeepReadonly<T, D extends any[] = []> = D['length'] extends 4
+	? Readonly<T>
+	: T extends object
+		? { readonly [K in keyof T]: DeepReadonly<T[K], [...D, 0]> }
+		: T;
 
 // A utility type that checks if T exhaustively covers all members of U.
 type ExhaustiveArray<T extends readonly any[], U> = [U] extends [T[number]] ? T : [...T, Exclude<U, T[number]>];

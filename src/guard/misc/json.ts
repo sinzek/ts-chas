@@ -44,13 +44,20 @@ export interface JsonGuard extends Guard<Json, JsonHelpers> {}
 
 export const JsonGuard: JsonGuard = makeGuard(
 	(value: unknown): value is Json => {
-		const fn = (value: unknown): value is Json =>
-			typeof value === 'string' ||
-			typeof value === 'number' ||
-			typeof value === 'boolean' ||
-			value === null ||
-			(Array.isArray(value) && value.every(fn)) ||
-			(typeof value === 'object' && Object.values(value).every(fn));
+		const fn = (v: unknown): v is Json => {
+			if (v === null) return true;
+			const t = typeof v;
+			if (t === 'string' || t === 'boolean') return true;
+			if (t === 'number') return Number.isFinite(v as number);
+			if (Array.isArray(v)) return v.every(fn);
+			if (t === 'object') {
+				// Only plain objects are JSON — reject Date, Map, Set, RegExp, class instances, etc.
+				const proto = Object.getPrototypeOf(v);
+				if (proto !== null && proto !== Object.prototype) return false;
+				return Object.values(v as object).every(fn);
+			}
+			return false;
+		};
 
 		return fn(value);
 	},

@@ -11,23 +11,41 @@ export interface EnumHelpers<T> {
 export type EnumGuard<T> = Guard<T, EnumHelpers<T>>;
 
 export interface EnumGuardFactory {
-	<T extends string | number | symbol>(values: readonly T[]): EnumGuard<T>;
-	<T extends Record<string, string | number | symbol>>(values: T): EnumGuard<T[keyof T]>;
+	<const T extends string | number | symbol>(values: readonly T[]): EnumGuard<T>;
+	<const T extends Record<string, string | number | symbol>>(values: T): EnumGuard<T[keyof T]>;
 }
 
 const enumHelpers: EnumHelpers<any> = {
 	exclude: transformer((target, ...values: readonly any[]) => {
-		const valuesSet = new Set(values);
+		const excludeSet = new Set(values);
+		const parentValues = target.meta.values instanceof Set ? target.meta.values : new Set<any>();
+		const nextValues = new Set<any>();
+		for (const v of parentValues) {
+			if (!excludeSet.has(v)) nextValues.add(v);
+		}
 		return {
-			fn: (v: unknown): v is any => target(v) && !valuesSet.has(v as any),
-			meta: { name: `${target.meta.name}.exclude(${values.map(safeStringify).join(', ')})` },
+			fn: (v: unknown): v is any => target(v) && !excludeSet.has(v as any),
+			meta: {
+				name: `${target.meta.name}.exclude(${values.map(safeStringify).join(', ')})`,
+				values: nextValues,
+				jsonSchema: { ...(target.meta.jsonSchema ?? {}), enum: [...nextValues] },
+			},
 		};
 	}) as any,
 	extract: transformer((target, ...values: readonly any[]) => {
-		const valuesSet = new Set(values);
+		const extractSet = new Set(values);
+		const parentValues = target.meta.values instanceof Set ? target.meta.values : new Set<any>();
+		const nextValues = new Set<any>();
+		for (const v of parentValues) {
+			if (extractSet.has(v)) nextValues.add(v);
+		}
 		return {
-			fn: (v: unknown): v is any => target(v) && valuesSet.has(v as any),
-			meta: { name: `${target.meta.name}.extract(${values.map(safeStringify).join(', ')})` },
+			fn: (v: unknown): v is any => target(v) && extractSet.has(v as any),
+			meta: {
+				name: `${target.meta.name}.extract(${values.map(safeStringify).join(', ')})`,
+				values: nextValues,
+				jsonSchema: { ...(target.meta.jsonSchema ?? {}), enum: [...nextValues] },
+			},
 		};
 	}) as any,
 };
@@ -47,7 +65,12 @@ export const EnumGuardFactory: EnumGuardFactory = (values: readonly any[] | Reco
 	}
 
 	return makeGuard(
-		(v: unknown): v is any => valuesArray.includes(v as any),
+		(v: unknown): v is any => {
+			for (const candidate of valuesArray) {
+				if (Object.is(candidate, v)) return true;
+			}
+			return false;
+		},
 		{ name: `enum<${name}>`, id: 'enum', values: new Set(valuesArray) },
 		enumHelpers
 	) as any;

@@ -295,8 +295,8 @@ const validateAge = is
 	})
 	.implResult(value => `You are ${value} years old`);
 
-validateAge(20); // Result.Ok('You are 20 years old')
-validateAge(15); // Result.Err(GuardErr)
+validateAge(20); // Result.ok('You are 20 years old')
+validateAge(15); // Result.err(GuardErr)
 ```
 
 **Guard validations directly to Results:**
