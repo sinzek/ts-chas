@@ -105,4 +105,86 @@ export const COERCERS: Record<string, (v: unknown) => unknown> = {
 		}
 		return v;
 	},
+
+	/**
+	 * Coerces base64 strings and number arrays to `Uint8Array`.
+	 *
+	 * - **Base64 string**: decoded via `atob()` (standard base64).
+	 *   Data-URI prefixes (`data:...;base64,`) are stripped automatically.
+	 * - **Array of numbers**: wrapped with `new Uint8Array(arr)`.
+	 *   Non-integer or out-of-range values are clamped by the Uint8Array constructor.
+	 * - **ArrayBuffer**: wrapped with `new Uint8Array(buf)`.
+	 */
+	uint8array: v => {
+		if (typeof v === 'string') return decodeBase64ToUint8Array(v);
+		if (Array.isArray(v) && v.every(x => typeof x === 'number')) return new Uint8Array(v);
+		if (v instanceof ArrayBuffer) return new Uint8Array(v);
+		return v;
+	},
+
+	/**
+	 * Coerces base64 strings and number arrays to Node.js `Buffer`.
+	 * Falls through gracefully in environments where `Buffer` is unavailable.
+	 *
+	 * - **Base64 string**: decoded via `Buffer.from(str, 'base64')`.
+	 * - **Array of numbers**: wrapped with `Buffer.from(arr)`.
+	 * - **ArrayBuffer / Uint8Array**: wrapped with `Buffer.from(buf)`.
+	 */
+	buffer: v => {
+		if (typeof Buffer === 'undefined') return v;
+		if (typeof v === 'string') {
+			try {
+				const clean = stripDataUri(v);
+				return Buffer.from(clean, 'base64');
+			} catch {
+				return v;
+			}
+		}
+		if (Array.isArray(v) && v.every(x => typeof x === 'number')) return Buffer.from(v);
+		if (v instanceof Uint8Array) return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+		if (v instanceof ArrayBuffer) return Buffer.from(new Uint8Array(v));
+		return v;
+	},
+
+	/**
+	 * Coerces base64 strings and number arrays to `ArrayBuffer`.
+	 *
+	 * - **Base64 string**: decoded to Uint8Array, then `.buffer` is extracted.
+	 * - **Array of numbers**: wrapped with `new Uint8Array(arr).buffer`.
+	 * - **Uint8Array / Buffer**: extracts the underlying `.buffer`.
+	 */
+	arraybuffer: v => {
+		if (typeof v === 'string') {
+			const u8 = decodeBase64ToUint8Array(v);
+			return u8 instanceof Uint8Array ? u8.buffer : v;
+		}
+		if (Array.isArray(v) && v.every(x => typeof x === 'number')) return new Uint8Array(v).buffer;
+		if (v instanceof Uint8Array) return v.buffer;
+		return v;
+	},
 };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Strips a `data:...;base64,` prefix if present. */
+function stripDataUri(s: string): string {
+	const idx = s.indexOf(';base64,');
+	return idx >= 0 ? s.slice(idx + 8) : s;
+}
+
+/** Decodes a base64 (or data-URI) string to a Uint8Array. Returns the original string on failure. */
+function decodeBase64ToUint8Array(s: string): Uint8Array | string {
+	try {
+		const clean = stripDataUri(s);
+		const binary = atob(clean);
+		const bytes = new Uint8Array(binary.length);
+		for (let i = 0; i < binary.length; i++) {
+			bytes[i] = binary.charCodeAt(i);
+		}
+		return bytes;
+	} catch {
+		return s;
+	}
+}

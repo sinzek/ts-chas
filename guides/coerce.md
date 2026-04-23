@@ -245,6 +245,61 @@ guard.parse(null).isOk(); // false
 
 ---
 
+### `is.uint8Array.coerce`, `is.buffer.coerce`, `is.arrayBuffer.coerce`
+
+Binary coercion converts **base64 strings** and **number arrays** into typed binary data. These cover the two most common wire formats: base64 (JSON payloads, JWTs, data URIs) and byte arrays (typed array serialization).
+
+| Input                              | `uint8Array`              | `buffer`                           | `arrayBuffer`                   |
+| ---------------------------------- | ------------------------- | ---------------------------------- | ------------------------------- |
+| Base64 string                      | via `atob()` decode       | via `Buffer.from(str, 'base64')`   | via `atob()` → `.buffer`        |
+| Data URI (`data:...;base64,...`)    | prefix stripped, then ↑   | prefix stripped, then ↑            | prefix stripped, then ↑         |
+| `number[]`                         | `new Uint8Array(arr)`     | `Buffer.from(arr)`                 | `new Uint8Array(arr).buffer`    |
+| `ArrayBuffer`                      | `new Uint8Array(buf)`     | `Buffer.from(new Uint8Array(buf))` | pass-through                    |
+| `Uint8Array`                       | pass-through              | `Buffer.from(view)`                | `.buffer` extracted             |
+| Other types                        | rejected                  | rejected                           | rejected                        |
+
+```ts
+const guard = is.uint8Array.coerce;
+
+// Base64 string
+guard.parse('SGVsbG8=').unwrap();
+// Uint8Array [72, 101, 108, 108, 111]
+
+// Data URI — prefix is stripped automatically
+guard.parse('data:application/octet-stream;base64,SGVsbG8=').unwrap();
+// Uint8Array [72, 101, 108, 108, 111]
+
+// Number array
+guard.parse([72, 101, 108, 108, 111]).unwrap();
+// Uint8Array [72, 101, 108, 108, 111]
+
+// Chain with size constraints
+is.uint8Array.coerce.size(5).parse('SGVsbG8=').isOk();  // true — 5 bytes
+is.uint8Array.coerce.size(5).parse(btoa('Hi')).isOk();  // false — 2 bytes
+
+// Buffer (Node.js only)
+is.buffer.coerce.parse('SGVsbG8=').unwrap().toString(); // 'Hello'
+
+// ArrayBuffer
+is.arrayBuffer.coerce.parse([72, 101]).unwrap(); // ArrayBuffer { byteLength: 2 }
+```
+
+<Warning>
+**Encoding ambiguity.** Binary coercion assumes standard base64 encoding (RFC 4648). Base64url, hex, and other encodings are not detected automatically. If you need a different encoding, use `.transform()` with an explicit decoder instead:
+
+```ts
+const fromHex = is.string.transform(s => {
+	const bytes = new Uint8Array(s.length / 2);
+	for (let i = 0; i < s.length; i += 2) {
+		bytes[i / 2] = parseInt(s.slice(i, i + 2), 16);
+	}
+	return bytes;
+});
+```
+</Warning>
+
+---
+
 ## Chaining: coerce position matters
 
 `.coerce` should appear directly after the base guard (before any constraint helpers). Constraint helpers added after `.coerce` run against the coerced value:
@@ -290,13 +345,16 @@ is.date.coerce.parse({}).isOk(); // false
 
 ## Summary
 
-| Type      | Converts from                                         |
-| --------- | ----------------------------------------------------- |
-| `string`  | any value via `String()`, dates via `.toISOString()`  |
-| `number`  | numeric strings, booleans, dates                      |
-| `boolean` | recognized truthy/falsy string patterns, `1`/`0`      |
-| `date`    | ISO strings, timestamp numbers                        |
-| `bigint`  | integer strings and integer numbers                   |
-| `object`  | JSON strings starting with `{`                        |
-| `array`   | JSON strings starting with `[`                        |
-| `result`  | plain `{ ok, value/error }` objects (revives methods) |
+| Type         | Converts from                                         |
+| ------------ | ----------------------------------------------------- |
+| `string`     | any value via `String()`, dates via `.toISOString()`  |
+| `number`     | numeric strings, booleans, dates                      |
+| `boolean`    | recognized truthy/falsy string patterns, `1`/`0`      |
+| `date`       | ISO strings, timestamp numbers                        |
+| `bigint`     | integer strings and integer numbers                   |
+| `object`     | JSON strings starting with `{`                        |
+| `array`      | JSON strings starting with `[`                        |
+| `result`     | plain `{ ok, value/error }` objects (revives methods) |
+| `uint8Array` | base64 strings, number arrays, ArrayBuffer            |
+| `buffer`     | base64 strings, number arrays, ArrayBuffer, Uint8Array|
+| `arrayBuffer`| base64 strings, number arrays, Uint8Array             |
