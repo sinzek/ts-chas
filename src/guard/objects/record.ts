@@ -73,7 +73,7 @@ export const RecordGuardFactory: RecordGuardFactory = <K extends string | number
 			if (requiredKeys) {
 				if (keys.length !== requiredKeys.size) return false;
 				for (const key of requiredKeys) {
-					if (!(key in obj) || !valGuard(obj[key])) return false;
+					if (!Object.hasOwn(obj, key as string) || !valGuard(obj[key as string])) return false;
 				}
 				for (const key of keys) {
 					if (!requiredKeys.has(key)) return false;

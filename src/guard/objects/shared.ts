@@ -8,6 +8,7 @@ import {
 	JSON_SCHEMA,
 	type GuardMeta,
 	hasForbiddenKey,
+	FORBIDDEN_KEYS,
 } from '../shared.js';
 import { type EnumHelpers, EnumGuardFactory } from '../misc/enum.js';
 
@@ -15,6 +16,11 @@ export type ObjectHelpers<T> = {
 	/**
 	 * Makes the object schema partial. With no arguments, all keys become optional.
 	 * When keys are specified, only those keys become optional while the rest remain as-is.
+	 *
+	 * **Ordering:** chain structure-altering helpers (`partial`, `required`, `pick`,
+	 * `omit`, `extend`) before value-level refinements (`.where`, `.size`, `.minSize`,
+	 * `.has`). The structure-altering helpers rebuild the predicate from `meta.shape`
+	 * alone, which silently discards any refinements chained earlier.
 	 *
 	 * @example
 	 * ```ts
@@ -32,6 +38,9 @@ export type ObjectHelpers<T> = {
 	 * Makes the object schema required. With no arguments, all keys become required.
 	 * When keys are specified, only those keys become required while the rest remain as-is.
 	 *
+	 * **Ordering:** like `partial`, chain before value-level refinements. The rebuilt
+	 * predicate does not preserve `.where`, `.size`, `.has`, etc. chained earlier.
+	 *
 	 * @example
 	 * ```ts
 	 * is.object({ a: is.string.optional, b: is.number.optional }).required();      // Guard<{ a: string; b: number }>
@@ -46,14 +55,23 @@ export type ObjectHelpers<T> = {
 	};
 	/**
 	 * Picks specific keys from the object schema and makes them the only keys in the resulting schema.
+	 *
+	 * **Ordering:** chain before value-level refinements. The rebuilt predicate does not
+	 * preserve `.where`, `.size`, `.has`, etc. chained earlier.
 	 */
 	pick: <K extends keyof T>(keys: K[]) => Guard<Prettify<Pick<T, K>>, ObjectHelpers<Pick<T, K>>>;
 	/**
 	 * Omits specific keys from the object schema.
+	 *
+	 * **Ordering:** chain before value-level refinements. The rebuilt predicate does not
+	 * preserve `.where`, `.size`, `.has`, etc. chained earlier.
 	 */
 	omit: <K extends keyof T>(keys: K[]) => Guard<Prettify<Omit<T, K>>, ObjectHelpers<Omit<T, K>>>;
 	/**
 	 * Extends the object schema with another schema. The resulting schema will have all keys from both schemas.
+	 *
+	 * **Ordering:** chain before value-level refinements. The rebuilt predicate does not
+	 * preserve `.where`, `.size`, `.has`, etc. chained earlier.
 	 */
 	extend: <S extends Record<string, Guard<any>>>(
 		schema: S
@@ -65,6 +83,22 @@ export type ObjectHelpers<T> = {
 	 * Ensures the object has NO extra keys not defined in the schema.
 	 */
 	strict: Guard<T, ObjectHelpers<T>>;
+	/**
+	 * Transforms the validated value to contain **only** the keys declared in the
+	 * schema, dropping any extra keys from the output. Unlike `.strict`, which
+	 * rejects inputs with extra keys, `.strip` accepts them and discards them.
+	 *
+	 * Use this when parsing untrusted input (e.g. HTTP bodies) to avoid leaking
+	 * unknown fields into downstream code.
+	 *
+	 * @example
+	 * ```ts
+	 * const User = is.object({ name: is.string, age: is.number }).strip;
+	 * User.parse({ name: 'x', age: 1, extra: 'ignored' });
+	 * // Ok({ name: 'x', age: 1 }) — 'extra' dropped
+	 * ```
+	 */
+	strip: Guard<T, ObjectHelpers<T>>;
 	/**
 	 * Allows any extra keys not defined in the schema, but only if they satisfy the provided guard.
 	 */
@@ -307,13 +341,23 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		const schema = target.meta.shape;
 		const parentMeta = target.meta;
 		const nextSchema = schema ? Object.fromEntries(Object.entries(schema).filter(([k]) => !keys.includes(k))) : {};
+		const omitKeys = new Set(keys);
 		const transform = (v: any) => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return v;
-			const omitted = { ...v };
-			for (const k of keys) {
-				delete omitted[k];
+			// Use defineProperty so that copying across __proto__ as an own key never
+			// triggers the native Object.prototype setter. A plain `{ ...v }` followed
+			// by `delete` would invoke the setter for that one iteration.
+			const out: any = {};
+			for (const k of Object.keys(v)) {
+				if (omitKeys.has(k)) continue;
+				Object.defineProperty(out, k, {
+					value: (v as any)[k],
+					writable: true,
+					enumerable: true,
+					configurable: true,
+				});
 			}
-			return omitted;
+			return out;
 		};
 		const nextFn = (v: unknown): v is any => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
@@ -413,6 +457,38 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 			};
 		})
 	) as any,
+	strip: property(
+		transformer<any, any, [], ObjectHelpers<any>>(target => {
+			const schema = target.meta.shape;
+			const parentMeta = target.meta;
+			const allowedKeys = schema ? new Set(Object.keys(schema)) : undefined;
+			return {
+				fn: (v: unknown): v is any => target(v),
+				meta: {
+					name: `${target.meta.name}.strip`,
+					...(parentMeta['allowProtoKeys'] === true && { allowProtoKeys: true }),
+					...(parentMeta['strict'] === true && { strict: true }),
+					...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
+					...(schema && { shape: schema }),
+				},
+				transform: (v: any) => {
+					if (v == null || typeof v !== 'object' || Array.isArray(v)) return v;
+					if (!allowedKeys) return v;
+					const out: any = {};
+					for (const k of Object.keys(v)) {
+						if (!allowedKeys.has(k)) continue;
+						Object.defineProperty(out, k, {
+							value: (v as any)[k],
+							writable: true,
+							enumerable: true,
+							configurable: true,
+						});
+					}
+					return out;
+				},
+			};
+		})
+	) as any,
 	catchall: transformer<any, any, [Guard<any>], ObjectHelpers<any>>((target, catchall: Guard<any>) => {
 		const schema = target.meta.shape;
 		const parentMeta = target.meta;
@@ -422,7 +498,14 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 			const obj = v as any;
 			const keys = Object.keys(obj);
 			const schemaKeys = Object.keys(schema);
-			return keys.every(k => schemaKeys.includes(k) || catchall(obj[k]));
+			return keys.every(k => {
+				if (schemaKeys.includes(k)) return true;
+				// Prototype-pollution keys are structural, not data. Refuse to accept them
+				// as catchall extras even when `.allowProtoKeys` was chained — if the user
+				// genuinely wants to accept them they must name them in the schema.
+				if (FORBIDDEN_KEYS.has(k)) return false;
+				return catchall(obj[k]);
+			});
 		};
 		return {
 			fn: nextFn,
@@ -462,19 +545,29 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		transformer<any, any, [], ObjectHelpers<any>>(target => {
 			const schema = target.meta.shape;
 			const parentMeta = target.meta;
+			const keyGuard = parentMeta['keyGuard'] as Guard<any> | undefined;
+			const valueGuard = parentMeta['valueGuard'] as Guard<any> | undefined;
 			const nextFn = (v: unknown): v is any => {
 				if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
+				const obj = v as Record<string, unknown>;
 				if (schema) {
-					const obj = v as Record<string, unknown>;
 					for (const key of Object.keys(schema)) {
 						if (!(schema as any)[key](obj[key])) return false;
 					}
+					return checkExtraKeys(parentMeta, obj, schema as Record<string, Guard<any>>);
 				}
-				return checkExtraKeys(
-					parentMeta,
-					v as Record<string, any>,
-					(schema ?? {}) as Record<string, Guard<any>>
-				);
+				// Open-ended record: validate each own entry against the key/value guards.
+				// Prototype-pollution keys are passed through unvalidated — that's precisely
+				// what `.allowProtoKeys` opts into. Other keys must still satisfy both guards.
+				if (keyGuard && valueGuard) {
+					for (const key of Object.keys(obj)) {
+						if (FORBIDDEN_KEYS.has(key)) continue;
+						if (!keyGuard(key) || !valueGuard(obj[key])) return false;
+					}
+					return true;
+				}
+				// Raw is.object() with no schema: shape-less check only.
+				return true;
 			};
 			return {
 				fn: nextFn,
@@ -482,6 +575,8 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 					name: `${target.meta.name}.allowProtoKeys`,
 					allowProtoKeys: true,
 					...(schema && { shape: schema }),
+					...(keyGuard && { keyGuard }),
+					...(valueGuard && { valueGuard }),
 					...(parentMeta['strict'] === true && { strict: true }),
 					...(parentMeta['catchall'] && { catchall: parentMeta['catchall'] }),
 				},
@@ -506,7 +601,7 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		const nextFn = (v: unknown): v is any => {
 			if (!target(v)) return false;
 			if (typeof v !== 'object' || v === null) return false;
-			if (!(key in v)) return false;
+			if (!Object.hasOwn(v, key)) return false;
 			if (guard && !guard((v as any)[key])) return false;
 			return true;
 		};
@@ -519,7 +614,8 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 		};
 	}),
 	hasAll: factory<[string[]], any, ObjectHelpers<any>>(
-		(keys: string[]) => (v: unknown) => typeof v === 'object' && v !== null && keys.every(key => key in v)
+		(keys: string[]) => (v: unknown) =>
+			typeof v === 'object' && v !== null && keys.every(key => Object.hasOwn(v, key))
 	),
 	hasOnly: factory<[string[]], any, ObjectHelpers<any>>(
 		(keys: string[]) => (v: unknown) =>

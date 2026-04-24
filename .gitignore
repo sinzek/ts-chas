@@ -5,3 +5,4 @@ dist
 .gemini
 .claude
 *.tsbuildinfo
+IMPLEMENTATION_PLAN.md

@@ -1,6 +1,27 @@
 import type { Brand } from '../shared.js';
 import { makeGuard, type Guard, factory, JSON_SCHEMA } from '../shared.js';
 
+/**
+ * Counts the number of decimal places in a finite number, correctly handling
+ * exponential notation. `Number.prototype.toString()` emits scientific notation
+ * for very small or very large magnitudes (e.g. `1e-10`, `1.5e-7`), so naive
+ * splitting on `.` silently reports 0 decimals for values that clearly have more.
+ */
+function countDecimalPlaces(v: number): number {
+	if (!Number.isFinite(v)) return Infinity;
+	const str = Math.abs(v).toString();
+	const eIdx = str.indexOf('e');
+	if (eIdx < 0) {
+		const dotIdx = str.indexOf('.');
+		return dotIdx < 0 ? 0 : str.length - dotIdx - 1;
+	}
+	const mantissa = str.slice(0, eIdx);
+	const exp = parseInt(str.slice(eIdx + 1), 10);
+	const dotIdx = mantissa.indexOf('.');
+	const mantissaDecimals = dotIdx < 0 ? 0 : mantissa.length - dotIdx - 1;
+	return Math.max(0, mantissaDecimals - exp);
+}
+
 export interface NumberHelpers {
 	/** Validates that the number is greater than the minimum. */
 	gt: (min: number) => Guard<number, NumberHelpers>;
@@ -59,9 +80,7 @@ const numberHelpers: NumberHelpers = {
 	even: ((v: number) => v % 2 === 0) as any,
 	odd: ((v: number) => v % 2 !== 0) as any,
 	port: ((v: number) => Number.isInteger(v) && v >= 0 && v <= 65535) as any,
-	precision: factory(
-		(n: number) => (v: number) => Number.isFinite(v) && (v.toString().split('.')[1]?.length || 0) <= n
-	),
+	precision: factory((n: number) => (v: number) => Number.isFinite(v) && countDecimalPlaces(v) <= n),
 	unit: ((v: number) => v >= 0 && v <= 1) as any,
 };
 

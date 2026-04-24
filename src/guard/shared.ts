@@ -162,6 +162,7 @@ export const RESERVED_META_KEYS: ReadonlySet<string> = new Set([
 	'keyGuard',
 	'valueGuard',
 	'discriminator',
+	'innerGuard',
 ]);
 
 /**
@@ -236,6 +237,9 @@ export type GuardMeta = {
 	 * A default value (or a function returning one) to use when input is `undefined`.
 	 * Unlike `fallback`, this fires *before* validation — only when the input is missing,
 	 * not when it fails the predicate.
+	 *
+	 * NOTE: A default does not change the behavior of the guard when used as a boolean type predicate
+	 * in `if` statements.
 	 */
 	default?: any | ((ctx: { meta: GuardMeta }) => any) | undefined;
 	/**
@@ -305,11 +309,56 @@ export type Brand<Tag extends string | number | symbol, Base> = Base & { readonl
 type AddBrand<T, Tag extends string | number | symbol> =
 	T extends Brand<infer T1, infer B1> ? Brand<T1 | Tag, B1> : Brand<Tag, T>;
 
+/**
+ * Removes a brand from a type.
+ *
+ * @example
+ * ```ts
+ * type Email = Brand<'Email', string>;
+ * type UnbrandedEmail = Unbrand<Email>; // string
+ * ```
+ */
 export type Unbrand<T, Tag extends string | number | symbol | undefined = undefined> =
 	T extends Brand<infer T1, infer B1> ? (Tag extends undefined ? B1 : Brand<Exclude<T1, Tag>, B1>) : T;
+
+/**
+ * Checks if a type is branded.
+ *
+ * @example
+ * ```ts
+ * type Email = Brand<'Email', string>;
+ * type UnbrandedEmail = Unbrand<Email>; // string
+ * type IsBrandedEmail = IsBranded<Email>; // true
+ * type IsBrandedUnbrandedEmail = IsBranded<UnbrandedEmail>; // false
+ * ```
+ */
 export type IsBranded<T> = T extends Brand<any, any> ? true : false;
+
+/**
+ * Checks if a type has a specific brand.
+ *
+ * @example
+ * ```ts
+ * type Email = Brand<'Email', string>;
+ * type UnbrandedEmail = Unbrand<Email>; // string
+ * type HasEmailBrand = HasBrand<Email, 'Email'>; // true
+ * type HasUnbrandedEmailBrand = HasBrand<UnbrandedEmail, 'Email'>; // false
+ * ```
+ */
 export type HasBrand<T, Tag extends string | number | symbol> =
 	T extends Brand<infer T1, any> ? (Tag extends T1 ? true : false) : false;
+
+/**
+ * Gets the brand of a type.
+ *
+ * @example
+ * ```ts
+ * type Email = Brand<'Email', string>;
+ * type UnbrandedEmail = Unbrand<Email>; // string
+ * type EmailBrand = GetBrand<Email>; // 'Email'
+ * type UnbrandedEmailBrand = GetBrand<UnbrandedEmail>; // never
+ * ```
+ */
 export type GetBrand<T> = T extends Brand<infer T1, any> ? T1 : never;
 
 // ---------------------------------------------------------------------------

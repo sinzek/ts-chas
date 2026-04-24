@@ -481,6 +481,7 @@ const baseIs = {
 	 * is.promise(42); // false
 	 */
 	promise: PromiseGuard,
+
 	formData: FormDataGuard,
 	uint8Array: Uint8ArrayGuard,
 	buffer: BufferGuard,
@@ -1039,8 +1040,8 @@ export function buildFromConstant<const T>(value: T, options?: BuildOptions): an
 	if (value instanceof DataView) return is.dataView;
 
 	if (Array.isArray(value)) {
-		const innerGuards = value.map(item => buildFromConstant(item, options as BuildOptions));
-		return asLiteral ? is.tuple(innerGuards as any) : is.array(...(innerGuards as any));
+		const innerGuards: any[] = value.map(item => buildFromConstant(item, options as BuildOptions));
+		return asLiteral ? is.tuple(innerGuards) : is.array(...innerGuards);
 	}
 
 	// works with plain objects with that do not have a prototype or a constructor

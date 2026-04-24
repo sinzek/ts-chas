@@ -312,13 +312,40 @@ export interface StringHelpers {
 }
 
 const RGX = {
-	email: /^(?!\.)(?!.*\.\.)([a-z0-9_'+\-.]*)[a-z0-9_+-]@([a-z0-9][a-z0-9-]*\.)+[a-z]{2,}$/i,
+	// Local-part: flat character class, no nested quantifiers (ReDoS-safe).
+	emailLocal: /^[a-z0-9_'+\-.]+$/i,
+	// Domain labels bounded to 63 chars each; no nested unbounded quantifiers.
+	emailDomain: /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i,
 	uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
 	emoji: /(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])/,
 };
 
+// RFC 5321 / 5322: total address <= 254, local <= 64, domain <= 253.
+const EMAIL_MAX_LENGTH = 254;
+const EMAIL_LOCAL_MAX_LENGTH = 64;
+const EMAIL_DOMAIN_MAX_LENGTH = 253;
+
+function isValidEmail(v: unknown): boolean {
+	if (typeof v !== 'string') return false;
+	const len = v.length;
+	if (len === 0 || len > EMAIL_MAX_LENGTH) return false;
+	const atIdx = v.lastIndexOf('@');
+	if (atIdx <= 0 || atIdx === len - 1) return false;
+	const local = v.slice(0, atIdx);
+	const domain = v.slice(atIdx + 1);
+	if (local.length > EMAIL_LOCAL_MAX_LENGTH) return false;
+	if (domain.length > EMAIL_DOMAIN_MAX_LENGTH) return false;
+	// Linear-time dot checks replace catastrophic negative-lookahead backtracking.
+	if (local.charCodeAt(0) === 46 /* '.' */) return false;
+	if (local.charCodeAt(local.length - 1) === 46) return false;
+	if (local.includes('..')) return false;
+	if (!RGX.emailLocal.test(local)) return false;
+	if (!RGX.emailDomain.test(domain)) return false;
+	return true;
+}
+
 const stringHelpers: StringHelpers = {
-	email: ((v: string) => RGX.email.test(v)) as any,
+	email: ((v: string) => isValidEmail(v)) as any,
 	url: ((v: string) => {
 		try {
 			new URL(v);
