@@ -39,9 +39,10 @@ describe('Universal helpers (v2)', () => {
 			const typeMismatch = is.string.parse(42);
 			expect(typeMismatch.unwrapErr().message).toMatch(/^Expected string, but got number/);
 
-			// Refinement failure: "Value "hello" failed validation"
+			// Refinement failure: "Value "hello" failed validation at .where(condition)"
 			const refinement = is.string.where(v => v.length > 10).parse('hello');
-			expect(refinement.unwrapErr().message).toMatch(/^Value .* failed validation$/);
+			expect(refinement.unwrapErr().message).toMatch(/^Value .* failed validation/);
+			expect(refinement.unwrapErr().message).toContain('.where');
 		});
 
 		it('uses custom error from .err() when present', () => {
@@ -104,12 +105,13 @@ describe('Universal helpers (v2)', () => {
 				expect(e.message).toMatch(/^Expected string, but got number/);
 			}
 
-			// Refinement failure
+			// Refinement failure — now pinpoints the failing chain step
 			try {
 				is.number.positive.assert(-5);
 				expect.unreachable('should have thrown');
 			} catch (e: any) {
-				expect(e.message).toMatch(/^Value .* failed validation$/);
+				expect(e.message).toMatch(/^Value .* failed validation/);
+				expect(e.message).toContain('.positive');
 			}
 		});
 	});
@@ -667,9 +669,10 @@ describe('Universal helpers (v2)', () => {
 			expect(result.unwrapErr().message).toContain('"hello"');
 		});
 
-		it('refinement failure: says "failed validation"', () => {
+		it('refinement failure: says "failed validation" and pinpoints the step', () => {
 			const result = is.number.positive.parse(-5);
-			expect(result.unwrapErr().message).toMatch(/failed validation$/);
+			expect(result.unwrapErr().message).toMatch(/failed validation/);
+			expect(result.unwrapErr().message).toContain('.positive');
 		});
 
 		it('refinement failure: includes the actual value', () => {

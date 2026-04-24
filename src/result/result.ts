@@ -1,6 +1,18 @@
 import type { None, Option, OptionAsync, Some } from '../option.js';
 import { GlobalErrs, type TaggedErr } from '../tagged-errs.js';
-import { safeStringify, type CatchTag, type CatchTarget, type ExtractErrorFromTarget, type NonVoid, type ResultErrHandlers, type ResultPartialErrHandlers, type HandlerReturnType, type NoExtraKeys, type AllowedMatchTagKeys, type AllowedMatchTagPartialKeys } from '../utils.js';
+import {
+	safeStringify,
+	type CatchTag,
+	type CatchTarget,
+	type ExtractErrorFromTarget,
+	type NonVoid,
+	type ResultErrHandlers,
+	type ResultPartialErrHandlers,
+	type HandlerReturnType,
+	type NoExtraKeys,
+	type AllowedMatchTagKeys,
+	type AllowedMatchTagPartialKeys,
+} from '../utils.js';
 import type { Err, Ok } from './shared.js';
 
 // ==== RESULT TYPE ====
@@ -1167,7 +1179,9 @@ export const ResultMethodsProto = {
 	log<T, E>(this: Result<T, E>, label?: string): Result<T, E> {
 		const isOk = this.isOk();
 		const logFn = isOk ? console.log : console.error;
-		logFn(`${label ?? 'Result'}: [${isOk ? 'Ok' : 'Err'}]: ${isOk ? safeStringify(this.value) : safeStringify(this.error)}`);
+		logFn(
+			`${label ?? 'Result'}: [${isOk ? 'Ok' : 'Err'}]: ${isOk ? safeStringify(this.value) : safeStringify(this.error)}`
+		);
 		return this;
 	},
 	context<T, E>(this: Result<T, E>, ctx: string | Record<string, unknown>): Result<T, E> {
@@ -1461,7 +1475,10 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 	 * }); // 10
 	 * ```
 	 */
-	matchSome<U, F>(fns: { Some: (value: NonVoid<T>) => U | PromiseLike<U>; None: () => F | PromiseLike<F> }): Promise<U | F> {
+	matchSome<U, F>(fns: {
+		Some: (value: NonVoid<T>) => U | PromiseLike<U>;
+		None: () => F | PromiseLike<F>;
+	}): Promise<U | F> {
 		return this._promise.then(res => {
 			if (res.isSome()) return fns.Some(res.value);
 			return fns.None();
@@ -1699,7 +1716,12 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 				if (res.isErr()) {
 					const error = res.error;
 					if (typeof target === 'string') {
-						if (error !== null && typeof error === 'object' && '_tag' in error && (error as any)._tag === target) {
+						if (
+							error !== null &&
+							typeof error === 'object' &&
+							'_tag' in error &&
+							(error as any)._tag === target
+						) {
 							await handler(error as any);
 						}
 					} else if (
@@ -1781,7 +1803,9 @@ export class ResultAsync<T, E> implements PromiseLike<Result<T, E>> {
 			this._promise.then(res => {
 				const isOk = res.isOk();
 				const logFn = isOk ? console.log : console.error;
-				logFn(`${label ?? 'ResultAsync'}: [${isOk ? 'Ok' : 'Err'}]: ${isOk ? safeStringify(res.value) : safeStringify(res.error)}`);
+				logFn(
+					`${label ?? 'ResultAsync'}: [${isOk ? 'Ok' : 'Err'}]: ${isOk ? safeStringify(res.value) : safeStringify(res.error)}`
+				);
 				return res;
 			})
 		);

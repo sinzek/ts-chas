@@ -28,6 +28,21 @@ describe('fallback helper', () => {
 			expect(guard.parse(123).unwrap()).toBe('id was string');
 		});
 
+		it('provides the error to the functional fallback', () => {
+			const guard = is.number.gt(10).fallback(({ error }) => {
+				expect(error._tag).toBe('GuardErr');
+				expect(error.actual).toBe('number');
+				expect(error.expected).toBe('number');
+				return -1;
+			});
+			expect(guard.parse(5).unwrap()).toBe(-1);
+		});
+
+		it('passes the error through on type-mismatch failures', () => {
+			const guard = is.string.fallback(({ error }) => `${error.expected}:${error.actual}`);
+			expect(guard.parse(42).unwrap()).toBe('string:number');
+		});
+
 		it('works with transform', () => {
 			const guard = is.string.trim().fallback('default');
 			expect(guard.parse('  hello  ').unwrap()).toBe('hello');

@@ -136,6 +136,35 @@ export function hasForbiddenKey(obj: object): boolean {
 }
 
 /**
+ * Meta keys that `.annotate()` refuses to set, because they carry validation-critical
+ * invariants or are populated by dedicated helpers (`.describe`, `.default`, `.fallback`,
+ * `.error`, `.transform`, etc.). Users who want to edit these should use the corresponding
+ * helper; `.annotate()` is strictly for custom user-level tooling metadata.
+ */
+export const RESERVED_META_KEYS: ReadonlySet<string> = new Set([
+	'schema',
+	'name',
+	'id',
+	'path',
+	'error',
+	'shape',
+	'values',
+	'fallback',
+	'default',
+	'description',
+	'transform',
+	'jsonSchema',
+	// Well-known internal keys set by specific guard factories
+	'elementGuards',
+	'guards',
+	'tupleGuards',
+	'restGuard',
+	'keyGuard',
+	'valueGuard',
+	'discriminator',
+]);
+
+/**
  * Metadata attached to every guard via `.meta`.
  *
  * Contains the guard's identity, the full chain name, error configuration,
@@ -196,12 +225,31 @@ export type GuardMeta = {
 	 */
 	values?: Set<any> | undefined;
 	/**
-	 * The default value (or a function returning one) to use when parsing fails.
+	 * The fallback value (or a function returning one) to use when parsing fails.
+	 * The callback receives the failing value and the error that would have been thrown.
 	 *
 	 * NOTE: A fallback does not change the behavior of the guard when used as a boolean type predicate
 	 * in `if` statements.
 	 */
-	fallback?: any | ((ctx: { meta: GuardMeta; value: unknown }) => any) | undefined;
+	fallback?: any | ((ctx: { meta: GuardMeta; value: unknown; error: GuardErr }) => any) | undefined;
+	/**
+	 * A default value (or a function returning one) to use when input is `undefined`.
+	 * Unlike `fallback`, this fires *before* validation — only when the input is missing,
+	 * not when it fails the predicate.
+	 */
+	default?: any | ((ctx: { meta: GuardMeta }) => any) | undefined;
+	/**
+	 * A human-readable description for the guard. Populated by `.describe(...)`.
+	 * Flows into JSON Schema output as `description` and can be read from `meta.description`
+	 * for tooling. Stored as a resolved string (function form is evaluated eagerly).
+	 */
+	description?: string | undefined;
+	/**
+	 * @internal The guard one chain step below this one. Used to walk the chain
+	 * at error time so refinement failures can point at the specific step that rejected.
+	 * Populated automatically by `createProxy`; do not set manually.
+	 */
+	_parent?: Guard<any, any> | undefined;
 	/**
 	 * A transformation function applied to the validated value before passing it
 	 * to subsequent helpers in the chain. Composed sequentially by `createProxy`
@@ -348,16 +396,32 @@ export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unkn
 	 */
 	unbrand: <Tag extends string | number | symbol | undefined = undefined>(tag?: Tag) => Guard<Unbrand<T, Tag>>;
 	/**
-	 * Parses a value against the guard.
+	 * Parses a value against the guard, returning a `Result<T, GuardErr>`.
+	 *
+	 * > [!NOTE]
+	 * > **Short-circuits on first failure.** Guards are type predicates first and
+	 * > error reporters second — `.parse()` stops at the first rejecting step and
+	 * > returns a single `GuardErr`. For exhaustive error collection across nested
+	 * > object/array/tuple shapes (every failing field reported at once), promote
+	 * > the guard with `.toSchema('Name').parse(value)` or compose with
+	 * > `defineSchemas(...)`.
+	 *
 	 * @param value The value to parse.
-	 * @param errMsg Optional error message or function that returns one.
-	 * @returns A result containing the parsed value or an error.
+	 * @param errMsg Optional override error message (string or function returning one).
+	 * @returns A result containing the parsed value or a single `GuardErr`.
 	 */
 	parse: (value: unknown, errMsg?: string | ((ctx: { meta: GuardMeta }) => string)) => Result<T, GuardErr>;
 	/**
-	 * Asserts that the value is valid according to the guard.
+	 * Asserts that the value is valid according to the guard, throwing a `GuardErr` on failure.
+	 *
+	 * > [!NOTE]
+	 * > **Short-circuits on first failure.** Like `.parse()`, only the first rejecting
+	 * > step is thrown. For full error collection across nested shapes, use
+	 * > `.toSchema('Name').assert(value)` which throws an `AggregateGuardError`
+	 * > containing every failing field.
+	 *
 	 * @param value The value to assert.
-	 * @param errMsg Optional error message or function that returns one.
+	 * @param errMsg Optional override error message (string or function returning one).
 	 * @throws {GuardErr} If the value is not valid.
 	 * @returns The correctly typed value if valid.
 	 */
@@ -459,10 +523,68 @@ export type Guard<T, H extends Record<string, any> = {}> = StandardSchemaV1<unkn
 	 * > (e.g. in `if (guard(v))`). The predicate still returns `false` if the input is invalid,
 	 * > as it cannot safely narrow the type of the original variable to include the fallback.
 	 *
-	 * @param value - The fallback value OR a function `(ctx) => T`.
+	 * @param value - The fallback value OR a function `(ctx) => T`. The ctx includes
+	 * the failing `value`, the guard's `meta`, and the `error` that would have been thrown.
 	 * @returns A new guard with the fallback configured.
 	 */
-	fallback: (value: T | ((ctx: { meta: GuardMeta; value: unknown }) => T)) => Guard<T, H>;
+	fallback: (value: T | ((ctx: { meta: GuardMeta; value: unknown; error: GuardErr }) => T)) => Guard<T, H>;
+	/**
+	 * Sets a default value used when input is `undefined`. Unlike `.fallback`, this
+	 * fires *before* validation runs, so the default itself is returned as-is without
+	 * being re-validated.
+	 *
+	 * Most useful on optional object fields — a missing key materializes the default
+	 * in `.parse()` / `.assert()` output rather than the undefined hole.
+	 *
+	 * @example
+	 * ```ts
+	 * const User = is.object({
+	 *   name: is.string,
+	 *   role: is.string.default('user'),
+	 * });
+	 * User.parse({ name: 'Alice' });               // Ok({ name: 'Alice', role: 'user' })
+	 * User.parse({ name: 'Alice', role: 'admin' }); // Ok({ name: 'Alice', role: 'admin' })
+	 * ```
+	 *
+	 * @param value - The default value OR a function `(ctx) => T`.
+	 * @returns A new guard with the default configured.
+	 */
+	default: (value: T | ((ctx: { meta: GuardMeta }) => T)) => Guard<T, H>;
+	/**
+	 * Attaches a human-readable description to the guard. Flows into the JSON Schema
+	 * output as `description` and can be read from `meta.description` for docs / tooling.
+	 *
+	 * Accepts either a static string or a function that receives the current `meta`
+	 * (evaluated eagerly at `.describe(...)` call time, so the function sees the
+	 * accumulated chain state up to this point).
+	 *
+	 * @example
+	 * ```ts
+	 * is.string.email.describe('User email address').toJsonSchema();
+	 * // { type: 'string', format: 'email', description: 'User email address' }
+	 *
+	 * is.number.int.gte(0).describe(m => `non-negative ${m.id}`).meta.description;
+	 * // 'non-negative number'
+	 * ```
+	 */
+	describe: (text: string | ((meta: GuardMeta) => string)) => Guard<T, H>;
+	/**
+	 * Merges custom metadata into the guard's `meta`. Intended for user-level tooling
+	 * metadata (tags, author, doc links, etc.) — not for touching fields that drive
+	 * validation behavior.
+	 *
+	 * Reserved keys (`id`, `name`, `shape`, `values`, `fallback`, `default`, `description`,
+	 * `error`, `transform`, `jsonSchema`, and internal guard-specific fields) are rejected
+	 * at runtime. Use the corresponding helper (`.describe`, `.default`, `.fallback`, ...) instead.
+	 *
+	 * @example
+	 * ```ts
+	 * const Email = is.string.email.annotate({ tag: 'pii', owner: 'auth-team' });
+	 * Email.meta.tag;    // 'pii'
+	 * Email.meta.owner;  // 'auth-team'
+	 * ```
+	 */
+	annotate: (data: Record<string, unknown>) => Guard<T, H>;
 	/**
 	 * Applies a transformation to the validated value. The guard still validates
 	 * the original input, but `.parse()` and `.assert()` return the transformed value.
@@ -946,11 +1068,18 @@ export function makeGuard<T, H extends Record<string, any> = {}>(
 }
 
 /** @internal Evaluates a fallback (static value or function). */
-export function evaluateFallback(fallback: any, meta: GuardMeta, value: unknown): any {
+export function evaluateFallback(fallback: any, meta: GuardMeta, value: unknown, error: GuardErr): any {
 	if (typeof fallback === 'function') {
-		return fallback({ meta, value });
+		return fallback({ meta, value, error });
 	}
 	return fallback;
+}
+/** @internal Evaluates a default (static value or function). Called when input is `undefined`. */
+export function evaluateDefault(def: any, meta: GuardMeta): any {
+	if (typeof def === 'function') {
+		return def({ meta });
+	}
+	return def;
 }
 /** @internal Evaluates an error message (static string or function). */
 export function evaluateError(
@@ -1280,21 +1409,16 @@ const universalHelpers: Record<string, any> = {
 			value: unknown,
 			errMsg?: string | ((meta: GuardMeta) => string)
 		): Result<any, GuardErr> => {
+			if (value === undefined && 'default' in target.meta) {
+				return ok(evaluateDefault(target.meta.default, target.meta));
+			}
 			if (target(value)) return ok(target.meta.transform ? target.meta.transform(value, value) : value);
 
+			const error = buildGuardErr(target, value, errMsg);
 			if ('fallback' in target.meta) {
-				return ok(evaluateFallback(target.meta.fallback, target.meta, value));
+				return ok(evaluateFallback(target.meta.fallback, target.meta, value, error));
 			}
-
-			const message = evaluateError(target.meta.error, target.meta, value, errMsg);
-			return GlobalErrs.GuardErr.err({
-				message: message ?? buildGuardErrMsg(target.meta, value),
-				path: target.meta.path,
-				expected: target.meta.id,
-				actual: getType(value),
-				values: target.meta.values,
-				name: target.meta.name,
-			});
+			return err(error);
 		}
 	),
 
@@ -1304,21 +1428,16 @@ const universalHelpers: Record<string, any> = {
 			value: unknown,
 			errMsg?: string | ((meta: GuardMeta) => string)
 		): T => {
+			if (value === undefined && 'default' in target.meta) {
+				return evaluateDefault(target.meta.default, target.meta);
+			}
 			if (target(value)) return target.meta.transform?.(value, value) ?? value;
 
+			const error = buildGuardErr(target, value, errMsg);
 			if ('fallback' in target.meta) {
-				return evaluateFallback(target.meta.fallback, target.meta, value);
+				return evaluateFallback(target.meta.fallback, target.meta, value, error);
 			}
-
-			const message = evaluateError(target.meta.error, target.meta, value, errMsg);
-			throw GlobalErrs.GuardErr.err({
-				message: message ?? buildGuardErrMsg(target.meta, value),
-				path: target.meta.path,
-				expected: target.meta.id,
-				actual: getType(value),
-				values: target.meta.values,
-				name: target.meta.name,
-			});
+			throw error;
 		}
 	),
 
@@ -1422,6 +1541,47 @@ const universalHelpers: Record<string, any> = {
 		},
 	})),
 
+	default: transformer((target, value: any) => ({
+		fn: (v: unknown): v is any => target(v),
+		meta: {
+			name: `${target.meta.name}.default(${typeof value === 'function' ? 'fn' : safeStringify(value)})`,
+			default: value,
+			jsonSchema: {
+				...target.meta.jsonSchema,
+				default: typeof value === 'function' ? undefined : value,
+			},
+		},
+	})),
+
+	describe: transformer((target, text: string | ((meta: GuardMeta) => string)) => {
+		const resolved = typeof text === 'function' ? text(target.meta) : text;
+		return {
+			fn: (v: unknown): v is any => target(v),
+			meta: {
+				name: target.meta.name,
+				description: resolved,
+				jsonSchema: { ...target.meta.jsonSchema, description: resolved },
+			},
+		};
+	}),
+
+	annotate: transformer((target: Guard<any, Record<string, any>>, data: Record<string, unknown>) => {
+		for (const k of Object.keys(data)) {
+			if (RESERVED_META_KEYS.has(k)) {
+				throw GlobalErrs.ChasErr({
+					message:
+						`[ts-chas] .annotate() cannot set reserved meta key "${k}". ` +
+						`Use the dedicated helper (e.g. .describe, .default, .fallback, .error) instead.`,
+					origin: 'annotate',
+				});
+			}
+		}
+		return {
+			fn: (v: unknown): v is any => target(v),
+			meta: data as Partial<GuardMeta>,
+		};
+	}),
+
 	array: property(
 		transformer((target: Guard<any, Record<string, any>>) => ({
 			fn: (v: unknown): v is any[] => Array.isArray(v) && v.every(item => target(item)),
@@ -1515,7 +1675,50 @@ export function getType(v: any): string {
 	if (v instanceof WeakSet) return 'weakset';
 	if (v instanceof Error) return 'error';
 	if (v instanceof Promise) return 'promise';
+	if (v instanceof File) return 'file';
+	if (v instanceof FormData) return 'formdata';
+	if (v instanceof Blob) return 'blob';
+	if (typeof Buffer !== 'undefined' && v instanceof Buffer) return 'buffer';
+	if (typeof Uint8Array !== 'undefined' && v instanceof Uint8Array) return 'uint8array';
+	if (typeof ArrayBuffer !== 'undefined' && v instanceof ArrayBuffer) return 'arraybuffer';
+	if (typeof DataView !== 'undefined' && v instanceof DataView) return 'dataview';
 	return 'object';
+}
+
+/**
+ * @internal Walks the `_parent` chain from root to leaf, calling each step's
+ * predicate against `value`. Returns the first step that rejects while its
+ * parent accepts — i.e., the exact refinement that broke the chain.
+ *
+ * Returns `undefined` if the root predicate already rejects (type mismatch, not a
+ * refinement) or if no rejecting step is found (which would indicate a spurious call).
+ */
+export function findFailingStep(guard: Guard<any, any>, value: unknown): Guard<any, any> | undefined {
+	const chain: Guard<any, any>[] = [];
+	let cur: Guard<any, any> | undefined = guard;
+	while (cur) {
+		chain.unshift(cur);
+		cur = cur.meta._parent as Guard<any, any> | undefined;
+	}
+	if (chain.length === 0 || !chain[0]!(value)) return undefined;
+	for (let i = 1; i < chain.length; i++) {
+		if (!chain[i]!(value)) return chain[i];
+	}
+	return undefined;
+}
+
+/**
+ * @internal Returns just the step's own name (e.g. `.min(3)` or `.email`) by
+ * stripping the parent's accumulated name prefix. Falls back to the full name
+ * if the parent name isn't a clean prefix.
+ */
+function stepLocalName(step: Guard<any, any>): string {
+	const parent = step.meta._parent as Guard<any, any> | undefined;
+	if (parent && step.meta.name.startsWith(parent.meta.name)) {
+		const suffix = step.meta.name.slice(parent.meta.name.length);
+		return suffix || step.meta.name;
+	}
+	return step.meta.name;
 }
 
 /**
@@ -1525,12 +1728,13 @@ export function getType(v: any): string {
  * - **Type mismatch**: the value isn't even the right base type
  *   → "Expected string, got number (123)"
  * - **Refinement failure**: the value is the right type but failed a chain step
- *   → "Value "hello" failed validation"
+ *   → "Value \"ab\" failed validation at .min(3)" (when a specific step is located)
+ *   → "Value \"ab\" failed validation" (fallback when the failing step can't be located)
  *
  * The guard chain name is always available on the error's `.name` field
  * for programmatic inspection — no need to duplicate it in the message.
  */
-export function buildGuardErrMsg(meta: GuardMeta, v: unknown): string {
+export function buildGuardErrMsg(meta: GuardMeta, v: unknown, guard?: Guard<any, any>): string {
 	const actual = getType(v);
 	const isRefinementFailure =
 		actual === meta.id ||
@@ -1538,12 +1742,44 @@ export function buildGuardErrMsg(meta: GuardMeta, v: unknown): string {
 		(meta.id === 'object' && actual === 'object');
 
 	if (isRefinementFailure) {
+		if (guard) {
+			const step = findFailingStep(guard, v);
+			if (step) {
+				return `Value ${safeStringify(v)} failed validation at ${stepLocalName(step)}`;
+			}
+		}
 		return `Value ${safeStringify(v)} failed validation`;
 	}
 	return `Expected ${meta.id}, but got ${actual} (${safeStringify(v)})`;
 }
 
 /**
+ * @internal Builds the raw GuardErr props for a failing value. Shared by the
+ * universal parse/assert/~standard sites so fallback callbacks can receive the
+ * same error object the caller would have seen.
+ *
+ * Accepts the full guard (not just meta) so the error message can walk the
+ * `_parent` chain to pinpoint which refinement failed.
+ */
+export function buildGuardErr(
+	guard: Guard<any, any>,
+	value: unknown,
+	customMsg?: string | ((meta: GuardMeta) => string) | undefined
+): GuardErr {
+	const meta = guard.meta;
+	const message = evaluateError(meta.error, meta, value, customMsg);
+	return GlobalErrs.GuardErr({
+		name: meta.name,
+		message: message ?? buildGuardErrMsg(meta, value, guard),
+		path: meta.path,
+		expected: meta.id,
+		actual: getType(value),
+		values: meta.values,
+	});
+}
+
+/**
+ * @internal
  * Wraps a guard function in a Proxy that intercepts all property access.
  * This is the single chaining mechanism — universal methods, type-specific
  * helpers, and composition all flow through here.
@@ -1575,23 +1811,20 @@ export function createProxy<T, H extends Record<string, any>>(
 					version: 1,
 					vendor: 'chas',
 					validate: (v: unknown): StandardSchemaV1.Result<T> => {
+						if (v === undefined && 'default' in target.meta) {
+							return { value: evaluateDefault(target.meta.default, target.meta) as T };
+						}
 						if (target(v)) {
 							const val = target.meta.transform ? target.meta.transform(v, v) : v;
 							return { value: val as T };
 						}
 
+						const error = buildGuardErr(target, v);
 						if ('fallback' in target.meta) {
-							return { value: evaluateFallback(target.meta.fallback, target.meta, v) as T };
+							return { value: evaluateFallback(target.meta.fallback, target.meta, v, error) as T };
 						}
-
-						const message = evaluateError(target.meta.error, target.meta, v);
 						return {
-							issues: [
-								{
-									message: message ?? buildGuardErrMsg(target.meta, v),
-									path: target.meta.path,
-								},
-							],
+							issues: [{ message: error.message, path: error.path }],
 						};
 					},
 				};
@@ -1600,44 +1833,30 @@ export function createProxy<T, H extends Record<string, any>>(
 			// Universal methods (terminal)
 			if (prop === 'parse') {
 				return (v: unknown) => {
+					if (v === undefined && 'default' in target.meta) {
+						return ok(evaluateDefault(target.meta.default, target.meta) as T);
+					}
 					if (target(v)) return ok((target.meta.transform ? target.meta.transform(v, v) : v) as T);
 
+					const error = buildGuardErr(target, v);
 					if ('fallback' in target.meta) {
-						return ok(evaluateFallback(target.meta.fallback, target.meta, v) as T);
+						return ok(evaluateFallback(target.meta.fallback, target.meta, v, error) as T);
 					}
-
-					const message = evaluateError(target.meta.error, target.meta, v);
-
-					return err(
-						GlobalErrs.GuardErr({
-							name: target.meta.name,
-							message: message ?? buildGuardErrMsg(target.meta, v),
-							path: target.meta.path,
-							expected: target.meta.id,
-							actual: getType(v),
-							values: target.meta.values,
-						})
-					);
+					return err(error);
 				};
 			}
 			if (prop === 'assert') {
 				return (v: unknown) => {
+					if (v === undefined && 'default' in target.meta) {
+						return evaluateDefault(target.meta.default, target.meta) as T;
+					}
 					if (target(v)) return (target.meta.transform ? target.meta.transform(v, v) : v) as T;
 
+					const error = buildGuardErr(target, v);
 					if ('fallback' in target.meta) {
-						return evaluateFallback(target.meta.fallback, target.meta, v) as T;
+						return evaluateFallback(target.meta.fallback, target.meta, v, error) as T;
 					}
-
-					const message = evaluateError(target.meta.error, target.meta, v);
-
-					throw GlobalErrs.GuardErr({
-						name: target.meta.name,
-						message: message ?? buildGuardErrMsg(target.meta, v),
-						path: target.meta.path,
-						expected: target.meta.id,
-						actual: getType(v),
-						values: target.meta.values,
-					});
+					throw error;
 				};
 			}
 
@@ -1665,6 +1884,7 @@ export function createProxy<T, H extends Record<string, any>>(
 						meta: {
 							...target.meta,
 							...result.meta,
+							_parent: target,
 							transform: result.transform
 								? (v: any, original: any) => {
 										const parentVal = target.meta.transform
@@ -1708,6 +1928,7 @@ export function createProxy<T, H extends Record<string, any>>(
 						{
 							meta: {
 								...target.meta,
+								_parent: target,
 								name: `${target.meta.name}.${String(prop)}(${args.map(a => safeStringify(a)).join(', ')})`,
 								...(jsonContrib && {
 									jsonSchema: { ...target.meta.jsonSchema, ...jsonContrib },
@@ -1732,6 +1953,7 @@ export function createProxy<T, H extends Record<string, any>>(
 				{
 					meta: {
 						...target.meta,
+						_parent: target,
 						name: `${target.meta.name}.${String(prop)}`,
 						...(jsonContrib && {
 							jsonSchema: { ...target.meta.jsonSchema, ...jsonContrib },

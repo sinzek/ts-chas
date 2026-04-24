@@ -1,7 +1,7 @@
-import { ok, ResultAsync, type Result } from '../result/result.js';
+import { ok, err, ResultAsync, type Result } from '../result/result.js';
 import { GlobalErrs } from '../tagged-errs.js';
 import type { Guard, GuardMeta, GuardErr } from './shared.js';
-import { buildGuardErrMsg, evaluateError, evaluateFallback, getType } from './shared.js';
+import { buildGuardErr, buildGuardErrMsg, evaluateDefault, evaluateError, evaluateFallback, getType } from './shared.js';
 
 // ---------------------------------------------------------------------------
 // Internal step types
@@ -113,20 +113,19 @@ export class AsyncGuard<T> {
 		const predicate = this.#syncGuard as unknown as (v: unknown) => boolean;
 		const meta = this.#syncGuard.meta;
 
-		// 1. Sync predicate — mirrors the inline parse terminal logic
+		// 1. Default short-circuit: if input is `undefined` and a default is set,
+		//    use it without running the predicate (mirrors the sync parse terminal).
+		if (value === undefined && 'default' in meta) {
+			return ok(evaluateDefault(meta.default, meta) as T);
+		}
+
+		// 2. Sync predicate — mirrors the inline parse terminal logic
 		if (!predicate(value)) {
+			const error = buildGuardErr(this.#syncGuard, value, errMsg);
 			if ('fallback' in meta) {
-				return ok(evaluateFallback(meta.fallback, meta, value) as T);
+				return ok(evaluateFallback(meta.fallback, meta, value, error) as T);
 			}
-			const message = evaluateError(meta.error, meta, value, errMsg);
-			return GlobalErrs.GuardErr.err({
-				message: message ?? buildGuardErrMsg(meta, value),
-				path: meta.path,
-				expected: meta.id,
-				actual: getType(value),
-				values: meta.values,
-				name: meta.name,
-			}) as unknown as Result<T, GuardErr>;
+			return err(error) as unknown as Result<T, GuardErr>;
 		}
 
 		// 2. Apply sync transform, then run async steps in declaration order

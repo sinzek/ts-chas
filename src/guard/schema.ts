@@ -46,9 +46,11 @@ import {
 	type InferGuard,
 	type GuardErr,
 	evaluateFallback,
+	evaluateDefault,
 	evaluateError,
 	_registerToSchema,
 	getType,
+	buildGuardErrMsg,
 } from './shared.js';
 import { generateTerminal } from './generate.js';
 
@@ -262,19 +264,6 @@ export function flattenErrors(errors: GuardErr[]): { path: string; message: stri
 // Deep recursive validation — the core of schema parsing
 // ---------------------------------------------------------------------------
 
-function buildErrMsg(meta: GuardMeta, v: unknown): string {
-	const actual = getType(v);
-	const isRefinement =
-		actual === meta.id ||
-		(meta.id === 'array' && Array.isArray(v)) ||
-		(meta.id === 'object' && actual === 'object');
-
-	if (isRefinement) {
-		return `Value ${safeStringify(v)} failed validation`;
-	}
-	return `Expected ${meta.id}, but got ${actual} (${safeStringify(v)})`;
-}
-
 /**
  * Recursively validates a value against a guard, descending into object shapes,
  * arrays, and tuples to collect ALL errors with full path tracking.
@@ -290,25 +279,30 @@ function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, pat
 	const meta = guard.meta;
 	const shape = meta.shape as Record<string, Guard<any>> | undefined;
 
+	// Default short-circuit: if input is `undefined` and a default is set, materialize it
+	// without running the predicate. Lets nested object fields with `.default(...)` fill in.
+	if (value === undefined && 'default' in meta) {
+		return evaluateDefault(meta.default, meta);
+	}
+
 	// Helper to handle failure and apply defaults
 	const handleFailure = (currentValue: unknown, expectedType: string, customMsg?: string) => {
+		const message = evaluateError(meta.error, meta, currentValue, customMsg);
+		const error = GlobalErrs.GuardErr({
+			name: meta.name,
+			message: message ?? buildGuardErrMsg(meta, currentValue, guard),
+			schema: schemaName,
+			path: [schemaName, ...path],
+			expected: expectedType,
+			actual: getType(currentValue),
+			values: meta.values,
+		});
+
 		if ('fallback' in meta) {
-			return evaluateFallback(meta.fallback, meta, currentValue);
+			return evaluateFallback(meta.fallback, meta, currentValue, error);
 		}
 
-		const message = evaluateError(meta.error, meta, currentValue, customMsg);
-
-		errors.push(
-			GlobalErrs.GuardErr({
-				name: meta.name,
-				message: message ?? buildErrMsg(meta, currentValue),
-				schema: schemaName,
-				path: [schemaName, ...path],
-				expected: expectedType,
-				actual: getType(currentValue),
-				values: meta.values,
-			})
-		);
+		errors.push(error);
 		return currentValue;
 	};
 
