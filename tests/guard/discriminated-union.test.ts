@@ -114,4 +114,25 @@ describe('is.discriminatedUnion()', () => {
 		// Extra keys beyond the variant shape are allowed since guards are non-strict by default
 		expect(ShapeGuard({ kind: 'circle', radius: 5, extra: true })).toBe(true);
 	});
+
+	it('does not bypass via prototype-chain keys on the variants record', () => {
+		// `variants[discriminant]` must not reach Object.prototype. Otherwise input like
+		// { kind: 'toString' } would resolve to Object.prototype.toString (a truthy
+		// function), pass the existence check, and silently succeed.
+		const guard = is.discriminatedUnion('kind', {
+			circle: is.object({ radius: is.number }),
+		});
+		expect(guard({ kind: 'toString', radius: 5 })).toBe(false);
+		expect(guard({ kind: 'hasOwnProperty', radius: 5 })).toBe(false);
+		expect(guard({ kind: 'constructor' })).toBe(false);
+		expect(guard({ kind: '__proto__' })).toBe(false);
+	});
+
+	it('rejects inputs with forbidden own keys (__proto__, constructor, prototype)', () => {
+		const guard = is.discriminatedUnion('kind', {
+			circle: is.object({ radius: is.number }),
+		});
+		const polluted = JSON.parse('{"kind":"circle","radius":5,"__proto__":{"polluted":true}}');
+		expect(guard(polluted)).toBe(false);
+	});
 });

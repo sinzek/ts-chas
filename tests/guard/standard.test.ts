@@ -72,7 +72,7 @@ describe('is.standard()', () => {
 		}
 	});
 
-	it('throws on async validation in sync mode', () => {
+	it('predicate returns false (without throwing) for async-only standard schemas', () => {
 		const asyncSchema: StandardSchemaV1 = {
 			'~standard': {
 				version: 1,
@@ -82,6 +82,24 @@ describe('is.standard()', () => {
 		};
 
 		const guard = is.standard(asyncSchema);
-		expect(() => guard('hello')).toThrow(/returned a Promise during synchronous validation/);
+		expect(() => guard('hello')).not.toThrow();
+		expect(guard('hello')).toBe(false);
+	});
+
+	it('parse() surfaces async-only standard schemas as an issue', () => {
+		const asyncSchema: StandardSchemaV1 = {
+			'~standard': {
+				version: 1,
+				vendor: 'async-vendor',
+				validate: () => Promise.resolve({ value: 'ok' }),
+			},
+		};
+
+		const guard = is.standard(asyncSchema);
+		const result = guard.parse('hello');
+		expect(result.isErr()).toBe(true);
+		if (result.isErr()) {
+			expect(result.error.issues?.[0].message).toMatch(/Promise during synchronous validation/);
+		}
 	});
 });

@@ -68,6 +68,19 @@ export const RecordGuardFactory: RecordGuardFactory = <K extends string | number
 		? Object.fromEntries([...requiredKeys].map(k => [String(k), valGuard]))
 		: undefined;
 
+	const valTransform = valGuard.meta.transform;
+	const transform = valTransform
+		? (v: any) => {
+				if (v == null || typeof v !== 'object' || Array.isArray(v)) return v;
+				const out: Record<string, any> = {};
+				for (const key of Object.keys(v)) {
+					const val = (v as Record<string, any>)[key];
+					out[key] = valTransform(val, val);
+				}
+				return out;
+			}
+		: undefined;
+
 	return makeGuard(
 		(v: unknown): v is Record<K, V> => {
 			if (v == null || typeof v !== 'object' || Array.isArray(v)) return false;
@@ -97,6 +110,7 @@ export const RecordGuardFactory: RecordGuardFactory = <K extends string | number
 			keyGuard,
 			valueGuard: valGuard,
 			...(shape && { shape }),
+			...(transform && { transform }),
 		},
 		objectHelpers as any
 	);

@@ -1,4 +1,4 @@
-import { type Guard, type InferGuard } from '../base/shared.js';
+import { type Guard, type InferGuard, hasForbiddenKey } from '../base/shared.js';
 import { makeGuard } from '../base/proxy.js';
 
 /**
@@ -70,12 +70,14 @@ export const DiscriminatedUnionGuardFactory: DiscriminatedUnionGuardFactory = <
 	variants: M
 ) => {
 	const variantKeys = Object.keys(variants);
+	const variantMap = new Map<string, Guard<any>>(variantKeys.map(k => [k, variants[k]!]));
 
 	const fn = (value: unknown): value is DiscriminatedUnionType<K, M> => {
-		if (value === null || typeof value !== 'object') return false;
+		if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+		if (hasForbiddenKey(value)) return false;
 		const discriminant = (value as Record<string, unknown>)[key];
-		if (discriminant === undefined) return false;
-		const guard = variants[discriminant as string];
+		if (typeof discriminant !== 'string' && typeof discriminant !== 'number') return false;
+		const guard = variantMap.get(String(discriminant));
 		if (!guard) return false;
 		return guard(value);
 	};

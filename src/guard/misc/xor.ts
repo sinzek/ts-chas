@@ -1,5 +1,6 @@
 import { type Guard, type InferGuard } from '../base/shared.js';
 import { makeGuard } from '../base/proxy.js';
+import { GlobalErrs } from '../../tagged-errs.js';
 
 export interface XorGuard<T extends Guard<any, any, any>[]> extends Guard<
 	InferGuard<T[number]>,
@@ -13,12 +14,19 @@ export interface XorGuardFactory {
 	 * Unlike `union` (which passes if *any* guard matches), `xor` rejects values
 	 * that satisfy multiple guards simultaneously.
 	 */
-	<T extends Guard<any, any, any>[]>(...guards: T): XorGuard<T>;
+	<T extends [Guard<any, any, any>, ...Guard<any, any, any>[]]>(...guards: T): XorGuard<T>;
 }
 
 const xorHelpers = {};
 
 export const XorGuardFactory: XorGuardFactory = (...guards) => {
+	if (guards.length === 0) {
+		GlobalErrs.ChasErr.throw({
+			message: '[ts-chas] is.xor() requires at least one guard.',
+			origin: 'is.xor()',
+		});
+	}
+
 	const fn = (value: unknown): value is any => {
 		let matchCount = 0;
 		for (const guard of guards) {

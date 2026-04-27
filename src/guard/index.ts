@@ -42,6 +42,7 @@ import { FunctionGuardFactory } from './primitives/function.js';
 import { NullishGuardFactory } from './primitives/nullish.js';
 import { StandardGuardFactory } from './custom/standard.js';
 import type { DeepWritable } from '../utils.js';
+import { GlobalErrs } from '../tagged-errs.js';
 
 // schema utilities
 export { defineSchemas, defineSchema, formatErrors, flattenErrors, AggregateGuardErr } from './schema.js';
@@ -943,14 +944,16 @@ export const is: IsAPI = Object.assign(baseIs, {
 	extend: <E extends Record<string, any>>(extensions: E): IsAPI<E> => {
 		for (const key of Object.keys(extensions)) {
 			if (key === 'extend') {
-				throw new Error(
-					`is.extend: cannot override reserved key 'extend'. Choose a different name for your custom guard.`
-				);
+				GlobalErrs.ChasErr.throw({
+					message: `Cannot override reserved key 'extend'. Choose a different name for your custom guard.`,
+					origin: 'is.extend()',
+				});
 			}
 			if (key in baseIs) {
-				throw new Error(
-					`is.extend: key '${key}' collides with a built-in guard. Choose a different name for your custom guard.`
-				);
+				GlobalErrs.ChasErr.throw({
+					message: `Key '${key}' collides with a built-in guard. Choose a different name for your custom guard.`,
+					origin: `is.extend()`,
+				});
 			}
 		}
 		return { ...baseIs, extend: is.extend, ...extensions } as IsAPI<E>;
@@ -1047,6 +1050,20 @@ export function buildFromConstant<const T>(value: T, options?: BuildOptions): an
 	if (value instanceof File) return is.file;
 	if (value instanceof Error) return is.error;
 	if (value instanceof Promise) return is.promise;
+	if (value instanceof Map) {
+		const first = value.values().next();
+		const firstKey = value.keys().next();
+		if (first.done) return is.map();
+		return is.map(
+			buildFromConstant(firstKey.value, options as BuildOptions),
+			buildFromConstant(first.value, options as BuildOptions)
+		);
+	}
+	if (value instanceof Set) {
+		const first = value.values().next();
+		if (first.done) return is.set();
+		return is.set(buildFromConstant(first.value, options as BuildOptions));
+	}
 	if (typeof FormData !== 'undefined' && value instanceof FormData) return is.formData;
 	if (value instanceof Uint8Array) {
 		if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return is.buffer;
@@ -1057,17 +1074,43 @@ export function buildFromConstant<const T>(value: T, options?: BuildOptions): an
 
 	if (Array.isArray(value)) {
 		const innerGuards: any[] = value.map(item => buildFromConstant(item, options as BuildOptions));
-		return asLiteral ? is.tuple(innerGuards) : is.array(...innerGuards);
+		if (asLiteral) return is.tuple(innerGuards);
+		// Heterogeneous arrays often produce duplicate guards (e.g. [1, 2, 3] → three
+		// is.number references). Dedupe by identity so the predicate's `some()` scan
+		// is O(unique members) instead of O(elements).
+		const seen = new Set<unknown>();
+		const deduped = innerGuards.filter(g => (seen.has(g) ? false : (seen.add(g), true)));
+		return is.array(...deduped);
 	}
 
-	// works with plain objects with that do not have a prototype or a constructor
-	const proto = Object.getPrototypeOf(value);
-	if (value && typeof value === 'object' && (proto === Object.prototype || proto === null)) {
-		const shape: any = {};
-		for (const [k, v] of Object.entries(value)) {
-			shape[k] = buildFromConstant(v, options as BuildOptions);
+	// `is.from` is sold as a strict schema builder. Functions can't be reflected into
+	// a meaningful guard (no input/output types available), so refuse rather than
+	// quietly returning `is.unknown` and pretending we built something.
+	if (typeof value === 'function') {
+		GlobalErrs.ChasErr.throw({
+			message:
+				`[ts-chas] is.from() does not support functions — input/output types cannot be inferred ` +
+				`from a value. Use is.function({ input, output }) to define a function guard explicitly.`,
+			origin: 'is.from(function)',
+		});
+	}
+
+	if (value && typeof value === 'object') {
+		const proto = Object.getPrototypeOf(value);
+		// Plain objects: build a shape guard from own keys.
+		if (proto === Object.prototype || proto === null) {
+			const shape: any = {};
+			for (const [k, v] of Object.entries(value)) {
+				shape[k] = buildFromConstant(v, options as BuildOptions);
+			}
+			return asLiteral ? is.object(shape).strict : is.object(shape);
 		}
-		return asLiteral ? is.object(shape).strict : is.object(shape);
+		// Class instance with a constructor we can inspect — narrow to that class
+		// rather than silently degrading to `is.unknown`.
+		const ctor = (value as any).constructor;
+		if (typeof ctor === 'function' && ctor !== Object) {
+			return is.instanceof(ctor);
+		}
 	}
 
 	// For primitives, conditionally return a literal guard or a generic primitive guard

@@ -581,8 +581,19 @@ export function buildGuardErr(
 		values: meta.values,
 		issues: (meta as any)._foreignSchema
 			? (() => {
-					const res = (meta as any)._foreignSchema['~standard'].validate(value);
-					return res instanceof Promise ? undefined : res.issues;
+					const foreign = (meta as any)._foreignSchema;
+					const res = foreign['~standard'].validate(value);
+					if (res instanceof Promise) {
+						return [
+							{
+								message:
+									`Standard schema "${foreign['~standard'].vendor}" returned a Promise during ` +
+									`synchronous validation. Use .parseAsync() for async-compliant schemas.`,
+								path: [],
+							},
+						];
+					}
+					return res.issues;
 				})()
 			: undefined,
 	});

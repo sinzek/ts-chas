@@ -43,14 +43,12 @@ export const StandardGuardFactory: StandardGuardFactory = (schema: StandardSchem
 	const validate = schema['~standard'].validate;
 
 	return makeGuard(
+		// Type predicates must not throw — `if (guard(v))` has to be safe to call.
+		// On async results we return false; the parse/assert path surfaces the
+		// async issue via the `_foreignSchema` issue collection in `buildGuardErr`.
 		(v: unknown): v is any => {
 			const result = validate(v);
-			if (result instanceof Promise) {
-				throw new Error(
-					`[ts-chas] Standard schema "${schema['~standard'].vendor}" returned a Promise during synchronous validation. ` +
-						`Standard schemas that use async refinements must be validated with .parseAsync().`
-				);
-			}
+			if (result instanceof Promise) return false;
 			return !result.issues;
 		},
 		{

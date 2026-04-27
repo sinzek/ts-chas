@@ -459,8 +459,13 @@ export const objectHelpers: ObjectHelpers<Record<string, any>> = {
 				const extObj: any = {};
 				for (const k of Object.keys(extension)) {
 					if (Object.hasOwn(original, k)) {
+						const raw = original[k];
+						// Apply the extension guard's per-field transform; otherwise extension
+						// fields like `is.string.trim()` would silently keep the raw input.
+						const t = extension[k]!.meta.transform;
+						const value = t ? t(raw, raw) : raw;
 						Object.defineProperty(extObj, k, {
-							value: original[k],
+							value,
 							writable: true,
 							enumerable: true,
 							configurable: true,

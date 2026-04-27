@@ -99,21 +99,21 @@ export interface UniversalHelpers<T, H extends Record<string, any>, Prev = undef
 	 *
 	 * `is.object({ name: is.string }).and(is.object({ age: is.number }))` → `Guard<{ name: string } & { age: number }>`
 	 */
-	and: <U>(other: Guard<U, Record<string, any>>) => Guard<T & U, H>;
+	and: <U>(other: Guard<U, Record<string, any>, any>) => Guard<T & U, H>;
 	/**
 	 * Combines this guard with another using OR: either can pass.
 	 * Drops type-specific helpers since the value could be either type.
 	 *
 	 * `is.string.or(is.number)` → `Guard<string | number>`
 	 */
-	or: <U>(other: Guard<U, Record<string, any>>) => Guard<T | U>;
+	or: <U>(other: Guard<U, Record<string, any>, any>) => Guard<T | U>;
 	/**
 	 * Combines this guard with another using XOR: exactly one can pass.
 	 * Drops type-specific helpers since the value could be either type.
 	 *
 	 * `is.string.xor(is.number)` → `Guard<string | number>`
 	 */
-	xor: <U>(other: Guard<U, Record<string, any>>) => Guard<T | U>;
+	xor: <U>(other: Guard<U, Record<string, any>, any>) => Guard<T | U>;
 	/**
 	 * Wraps the guard to also accept `null`.
 	 * Drops type-specific helpers since the value may be null.
@@ -713,9 +713,12 @@ export const universalHelpers: Record<string, any> = {
 
 	toSchema: terminal((target: Guard<any>, name: string) => {
 		if (!_toSchemaFn) {
-			throw new Error(
-				'[ts-chas] Guard.toSchema() is unavailable — import from "ts-chas/guard" rather than an internal module.'
-			);
+			GlobalErrs.ChasErr.throw({
+				message:
+					'[ts-chas] Guard.toSchema() is unavailable — import from "ts-chas/guard" rather than an internal module.',
+				origin: `toSchema(${target.meta.id})`,
+			});
+			return;
 		}
 		return _toSchemaFn(name, target);
 	}) as any,

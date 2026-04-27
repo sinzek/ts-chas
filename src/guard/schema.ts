@@ -357,8 +357,6 @@ function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, pat
 
 			for (let i = 0; i < value.length; i++) {
 				const elemPath = [...path, `[${i}]`];
-				// For simple elements in a union array, we just find the first guard that passes
-				// or use the first guard to report errors if none pass.
 				const passingGuard = elementGuards.find(g => g(value[i]));
 
 				if (passingGuard) {
@@ -367,13 +365,28 @@ function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, pat
 						result[i] = validated;
 						hasChanges = true;
 					}
-				} else {
-					// None of the element guards passed, use the first one to recurse/report
+				} else if (elementGuards.length === 1) {
+					// Single-guard array — recurse into it for a precise nested error.
 					const validated = validateDeep(value[i], elementGuards[0]!, schemaName, elemPath, errors);
 					if (validated !== value[i]) {
 						result[i] = validated;
 						hasChanges = true;
 					}
+				} else {
+					// Heterogeneous array — no member matched. Don't pick `elementGuards[0]`
+					// arbitrarily; that produces misleading "expected X" errors. Emit a single
+					// flat error naming all expected variants.
+					const expected = elementGuards.map(g => g.meta.id || g.meta.name).join(' | ');
+					errors.push(
+						GlobalErrs.GuardErr({
+							name: meta.name,
+							message: `Value ${safeStringify(value[i])} did not match any element variant (${expected})`,
+							schema: schemaName,
+							path: [schemaName, ...elemPath],
+							expected,
+							actual: getType(value[i]),
+						})
+					);
 				}
 			}
 
@@ -446,10 +459,12 @@ function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, pat
 	if ((meta as any)._foreignSchema) {
 		const result = (meta as any)._foreignSchema['~standard'].validate(value);
 		if (result instanceof Promise) {
-			throw new Error(
-				`[ts-chas] Standard schema "${(meta as any)._foreignSchema['~standard'].vendor}" returned a Promise during synchronous validation. ` +
-					`Standard schemas that use async refinements must be validated with .parseAsync().`
-			);
+			GlobalErrs.ChasErr.throw({
+				message:
+					`[ts-chas] Standard schema "${(meta as any)._foreignSchema['~standard'].vendor}" returned a Promise during synchronous validation. ` +
+					`Standard schemas that use async refinements must be validated with .parseAsync().`,
+				origin: `validateDeep(${safeStringify(value)})`,
+			});
 		}
 		if (result.issues) {
 			return handleFailure(value, meta.id, undefined, result.issues);
