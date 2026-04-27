@@ -1,21 +1,23 @@
 import { safeStringify } from '../../utils.js';
-import { makeGuard, type Guard, transformer } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { transformer } from '../base/helper-markers.js';
 
 export interface EnumHelpers<T> {
 	/** Excludes specific values from the enum. */
-	exclude: <U extends T>(...values: readonly U[]) => Guard<Exclude<T, U>, EnumHelpers<Exclude<T, U>>>;
+	exclude: <U extends T>(...values: readonly U[]) => EnumGuard<Exclude<T, U>>;
 	/** Extracts only specific values from the enum. */
-	extract: <U extends T>(...values: readonly U[]) => Guard<Extract<T, U>, EnumHelpers<Extract<T, U>>>;
+	extract: <U extends T>(...values: readonly U[]) => EnumGuard<Extract<T, U>>;
 }
 
-export type EnumGuard<T> = Guard<T, EnumHelpers<T>>;
+export interface EnumGuard<T> extends Guard<T, EnumHelpers<T>, EnumGuard<T>> {}
 
 export interface EnumGuardFactory {
 	<const T extends string | number | symbol>(values: readonly T[]): EnumGuard<T>;
 	<const T extends Record<string, string | number | symbol>>(values: T): EnumGuard<T[keyof T]>;
 }
 
-const enumHelpers: EnumHelpers<any> = {
+export const enumHelpers: EnumHelpers<any> = {
 	exclude: transformer((target, ...values: readonly any[]) => {
 		const excludeSet = new Set(values);
 		const parentValues = target.meta.values instanceof Set ? target.meta.values : new Set<any>();

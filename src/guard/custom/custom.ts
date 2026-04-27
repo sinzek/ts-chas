@@ -1,6 +1,7 @@
-import { type Guard, makeGuard } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
-export type CustomGuard<T> = Guard<T>;
+export interface CustomGuard<T> extends Guard<T, {}, CustomGuard<T>> {}
 
 export interface CustomGuardFactory {
 	<T>(fn: ((v: unknown) => boolean) | ((v: unknown) => v is T)): CustomGuard<T>;

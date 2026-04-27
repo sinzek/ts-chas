@@ -536,16 +536,19 @@ Steps chain in declaration order and each step receives the value produced by th
 
 Every guard implements the [Standard Schema v1](https://github.com/standard-schema/standard-schema) specification via the `~standard` property. This makes guards compatible with tRPC, react-hook-form, Drizzle, and any other library that consumes the spec — no adapter needed.
 
+You can also wrap other Standard Schema libraries (like Zod) using `is.standard`. See the [Standard Schema guide](./standard-schema.md) for more details.
+
 ```typescript
 import { is } from 'ts-chas/guard';
+import { z } from 'zod';
 
-// Directly usable anywhere Standard Schema v1 is accepted
+// Wrap a Zod schema to use inside chas
+const guard = is.standard(z.string().email());
+
+// Direct Standard Schema usage
 const emailGuard = is.string.trim().email;
 emailGuard['~standard'].validate('hello@example.com');
 // { value: 'hello@example.com' }
-
-emailGuard['~standard'].validate('not-an-email');
-// { issues: [{ message: '...', path: [...] }] }
 ```
 
 ---

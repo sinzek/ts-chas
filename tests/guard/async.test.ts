@@ -238,4 +238,44 @@ describe('AsyncGuard', () => {
 		const invalid = await outer.parseAsync({ address: { zip: '00000' } });
 		expect(invalid.ok).toBe(false);
 	});
+
+	// ---- assertAsync -----------------------------------------------------------
+
+	it('assertAsync resolves with the value on success', async () => {
+		const guard = is.string.whereAsync(async () => true);
+		const value = await guard.assertAsync('hello');
+		expect(value).toBe('hello');
+	});
+
+	it('assertAsync rejects with GuardErr when sync check fails', async () => {
+		const guard = is.string.email.whereAsync(async () => true);
+		await expect(guard.assertAsync(123)).rejects.toBeDefined();
+	});
+
+	it('assertAsync rejects with GuardErr when async predicate fails', async () => {
+		const guard = is.string.whereAsync(async () => false);
+		await expect(guard.assertAsync('hello')).rejects.toBeDefined();
+	});
+
+	it('assertAsync applies sync transforms before returning', async () => {
+		const guard = is.string.transform(v => v.toUpperCase()).whereAsync(async () => true);
+		const value = await guard.assertAsync('hello');
+		expect(value).toBe('HELLO');
+	});
+
+	it('assertAsync applies refineAsync transforms', async () => {
+		const guard = is.string.refineAsync(async v => v.trim().toUpperCase());
+		const value = await guard.assertAsync('  hello  ');
+		expect(value).toBe('HELLO');
+	});
+
+	it('assertAsync uses custom error message', async () => {
+		const guard = is.string.whereAsync(async () => false);
+		try {
+			await guard.assertAsync('hello', 'custom error');
+			expect.unreachable('should have thrown');
+		} catch (e: any) {
+			expect(e.message).toBe('custom error');
+		}
+	});
 });

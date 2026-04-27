@@ -1,12 +1,15 @@
-import { makeGuard, type Guard, type InferGuard, type GuardErr, terminal } from '../shared.js';
+import { type Guard, type InferGuard, type GuardErr } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 import { AggregateGuardErr } from '../schema.js';
 import { ok, err, type Result, ResultAsync } from '../../result/result.js';
 import { GlobalErrs } from '../../tagged-errs.js';
+import { terminal } from '../base/helper-markers.js';
 
-export type FunctionGuard<Input extends Guard<any>[], Output extends Guard<any> | undefined> = Guard<
-	(...args: { [K in keyof Input]: InferGuard<Input[K]> }) => Output extends Guard<any> ? InferGuard<Output> : unknown,
-	FunctionHelpers<Input, Output>
->;
+export interface FunctionGuard<Input extends Guard<any, any, any>[], Output extends Guard<any, any, any> | undefined> extends Guard<
+	(...args: { [K in keyof Input]: InferGuard<Input[K]> }) => Output extends Guard<any, any, any> ? InferGuard<Output> : unknown,
+	FunctionHelpers<Input, Output>,
+	FunctionGuard<Input, Output>
+> {}
 
 export interface FunctionGuardFactory {
 	/**
@@ -15,18 +18,18 @@ export interface FunctionGuardFactory {
 	 * Use `.impl` or `.implAsync` to create a validated wrapper that enforces
 	 * input and output types at runtime.
 	 */
-	<Input extends Guard<any>[], Output extends Guard<any> | undefined = undefined>(types: {
+	<Input extends Guard<any, any, any>[], Output extends Guard<any, any, any> | undefined = undefined>(types: {
 		input: [...Input];
 		output?: Output;
 	}): Guard<
 		(
 			...args: { [K in keyof Input]: InferGuard<Input[K]> }
-		) => Output extends Guard<any> ? InferGuard<Output> : unknown,
+		) => Output extends Guard<any, any, any> ? InferGuard<Output> : unknown,
 		FunctionHelpers<Input, Output>
 	>;
 }
 
-export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guard<any> | undefined> {
+export interface FunctionHelpers<Input extends Guard<any, any, any>[], Output extends Guard<any, any, any> | undefined> {
 	/**
 	 * Transforms the guard to return a validated version of the function.
 	 *
@@ -38,10 +41,10 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	impl: <
 		F extends (
 			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
-		) => Output extends Guard<any> ? InferGuard<Output> : any,
+		) => Output extends Guard<any, any, any> ? InferGuard<Output> : any,
 	>(
 		fn: F
-	) => (...args: Parameters<F>) => Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>;
+	) => (...args: Parameters<F>) => Output extends Guard<any, any, any> ? InferGuard<Output> : ReturnType<F>;
 
 	/**
 	 * Similar to `.impl`, but handles async functions.
@@ -52,10 +55,10 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	implAsync: <
 		F extends (
 			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
-		) => Promise<Output extends Guard<any> ? InferGuard<Output> : any>,
+		) => Promise<Output extends Guard<any, any, any> ? InferGuard<Output> : any>,
 	>(
 		fn: F
-	) => (...args: Parameters<F>) => Promise<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
+	) => (...args: Parameters<F>) => Promise<Output extends Guard<any, any, any> ? InferGuard<Output> : Awaited<ReturnType<F>>>;
 
 	/**
 	 * Similar to `.impl`, but instead of throwing an `AggregateGuardErr`, returns a `Result<T, AggregateGuardErr>`.
@@ -63,12 +66,12 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	implResult: <
 		F extends (
 			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
-		) => Output extends Guard<any> ? InferGuard<Output> : any,
+		) => Output extends Guard<any, any, any> ? InferGuard<Output> : any,
 	>(
 		fn: F
 	) => (
 		...args: Parameters<F>
-	) => Result<Output extends Guard<any> ? InferGuard<Output> : ReturnType<F>, AggregateGuardErr>;
+	) => Result<Output extends Guard<any, any, any> ? InferGuard<Output> : ReturnType<F>, AggregateGuardErr>;
 
 	/**
 	 * Similar to `.implAsync`, but returns a `ResultAsync<T, AggregateGuardErr>` instead of throwing.
@@ -76,16 +79,16 @@ export interface FunctionHelpers<Input extends Guard<any>[], Output extends Guar
 	implResultAsync: <
 		F extends (
 			...args: { [K in keyof Input]: Exclude<InferGuard<Input[K]>, undefined> }
-		) => Promise<Output extends Guard<any> ? InferGuard<Output> : any>,
+		) => Promise<Output extends Guard<any, any, any> ? InferGuard<Output> : any>,
 	>(
 		fn: F
 	) => (
 		...args: Parameters<F>
-	) => ResultAsync<Output extends Guard<any> ? InferGuard<Output> : Awaited<ReturnType<F>>, AggregateGuardErr>;
+	) => ResultAsync<Output extends Guard<any, any, any> ? InferGuard<Output> : Awaited<ReturnType<F>>, AggregateGuardErr>;
 }
 
 function validateInputs(target: any, args: any[]): void {
-	const { inputGuards }: { inputGuards: Guard<any>[] } = target.meta;
+	const { inputGuards }: { inputGuards: Guard<any, any, any>[] } = target.meta;
 	const errs: GuardErr[] = [];
 	for (let i = 0; i < inputGuards.length; i++) {
 		const result = inputGuards[i]?.parse(args[i]);
@@ -106,7 +109,7 @@ function validateInputs(target: any, args: any[]): void {
 }
 
 function validateOutput(target: any, result: any): any {
-	const { outputGuard }: { outputGuard?: Guard<any> } = target.meta;
+	const { outputGuard }: { outputGuard?: Guard<any, any, any> } = target.meta;
 	if (!outputGuard) return result;
 	const outRes = outputGuard.parse(result);
 	if (outRes.isErr()) {

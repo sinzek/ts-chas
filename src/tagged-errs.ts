@@ -1,6 +1,7 @@
 import { err, type Result, type ResultAsync } from './result/result.js';
 import { fromPromise, tryCatch } from './result/result-helpers.js';
 import type { Prettify } from './utils.js';
+import type { StandardSchemaV1 } from './standard-schema.js';
 
 /**
  * `TaggedErr` is a `Error` instance with a `_tag` discriminant field. It is an extension of `Error`
@@ -475,6 +476,7 @@ export const GlobalErrs = defineErrs({
 		actual: string;
 		schema?: string | undefined;
 		values?: Set<any> | undefined;
+		issues?: readonly StandardSchemaV1.Issue[] | undefined;
 	}) => props,
 	ChasErr: (props: { message: string; origin: string; cause?: unknown }) => props,
 });

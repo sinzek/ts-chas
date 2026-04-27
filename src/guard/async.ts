@@ -1,7 +1,14 @@
 import { ok, err, ResultAsync, type Result } from '../result/result.js';
 import { GlobalErrs } from '../tagged-errs.js';
-import type { Guard, GuardMeta, GuardErr } from './shared.js';
-import { buildGuardErr, buildGuardErrMsg, evaluateDefault, evaluateError, evaluateFallback, getType } from './shared.js';
+import type { Guard, GuardMeta, GuardErr } from './base/shared.js';
+import {
+	buildGuardErr,
+	buildGuardErrMsg,
+	evaluateDefault,
+	evaluateError,
+	evaluateFallback,
+	getType,
+} from './base/shared.js';
 
 // ---------------------------------------------------------------------------
 // Internal step types
@@ -107,6 +114,24 @@ export class AsyncGuard<T> {
 	 */
 	parseAsync(value: unknown, errMsg?: string): ResultAsync<T, GuardErr> {
 		return new ResultAsync<T, GuardErr>(this.#run(value, errMsg));
+	}
+
+	/**
+	 * Validates `value` through the sync guard then all async steps in order.
+	 *
+	 * Resolves with the validated (and possibly transformed) value, or rejects
+	 * with a `GuardErr` if any step fails.
+	 *
+	 * @example
+	 * ```ts
+	 * const email = await UniqueEmail.assertAsync(input);
+	 * // throws GuardErr if sync check or async predicate fails
+	 * ```
+	 */
+	async assertAsync(value: unknown, errMsg?: string): Promise<T> {
+		const result = await this.#run(value, errMsg);
+		if (result.isOk()) return result.value;
+		throw result.error;
 	}
 
 	async #run(value: unknown, errMsg?: string): Promise<Result<T, GuardErr>> {

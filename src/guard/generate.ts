@@ -9,7 +9,7 @@
  */
 
 import { GlobalErrs } from '../tagged-errs.js';
-import type { Guard } from './shared.js';
+import type { Guard } from './base/shared.js';
 
 /** @internal Lazily resolved fast-check module. */
 let fc: typeof import('fast-check') | undefined;
@@ -74,6 +74,10 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 		return fc.oneof(fc.constant(undefined), buildArbitrary(meta['inner'] as Guard<any>, fc));
 	}
 
+	if (meta.id === 'branded') {
+		return buildArbitrary(meta['inner'] as Guard<any>, fc);
+	}
+
 	if (meta.id === 'nullish') {
 		return fc.oneof(fc.constant(null), fc.constant(undefined), buildArbitrary(meta['inner'] as Guard<any>, fc));
 	}
@@ -116,8 +120,13 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 	}
 
 	if (meta.id === 'intersection' && Array.isArray(meta['guards'])) {
-		// Intersection is hard to generate correctly; best-effort: generate from the first guard
-		return buildArbitrary((meta['guards'] as Guard<any>[])[0]!, fc);
+		const arbs = (meta['guards'] as Guard<any>[]).map(g => buildArbitrary(g, fc));
+		return fc.tuple(...(arbs as [any])).map((values: any[]) => {
+			if (values.every(v => typeof v === 'object' && v !== null && !Array.isArray(v))) {
+				return Object.assign({}, ...values);
+			}
+			return values[0];
+		});
 	}
 
 	if (meta.id === 'discriminatedUnion' && meta['variantMap'] && meta['discriminantKey']) {
@@ -158,9 +167,10 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 		const constraints: import('fast-check').ArrayConstraints = {};
 		if (js.minProperties !== undefined) constraints.minLength = js.minProperties;
 		if (js.maxProperties !== undefined) constraints.maxLength = js.maxProperties;
-		return fc
-			.array(fc.tuple(keyArb, valueArb), constraints)
-			.map((entries: [any, any][]) => Object.fromEntries(entries));
+		return fc.array(fc.tuple(keyArb, valueArb), constraints).map((entries: [any, any][]) => {
+			const safeEntries = entries.filter(([k]) => k !== '__proto__' && k !== 'constructor' && k !== 'prototype');
+			return Object.fromEntries(safeEntries);
+		});
 	}
 
 	if (meta.id === 'URL') {
@@ -214,13 +224,19 @@ export function buildArbitrary(guard: Guard<any>, fc: typeof import('fast-check'
 		if (js.minLength !== undefined) constraints.minLength = js.minLength;
 		if (js.maxLength !== undefined) constraints.maxLength = js.maxLength;
 		let arb: any = fc.uint8Array(constraints);
-		if (meta.id === 'buffer') arb = arb.map((a: Uint8Array) => (typeof Buffer !== 'undefined' ? Buffer.from(a) : a));
+		if (meta.id === 'buffer')
+			arb = arb.map((a: Uint8Array) => (typeof Buffer !== 'undefined' ? Buffer.from(a) : a));
 		if (meta.id === 'arrayBuffer') arb = arb.map((a: Uint8Array) => a.buffer);
 		if (meta.id === 'dataView') arb = arb.map((a: Uint8Array) => new DataView(a.buffer));
 		return arb;
 	}
 
-	if (meta.id === 'iterable' || meta.id === 'asyncIterable' || meta.id === 'generator' || meta.id === 'asyncGenerator') {
+	if (
+		meta.id === 'iterable' ||
+		meta.id === 'asyncIterable' ||
+		meta.id === 'generator' ||
+		meta.id === 'asyncGenerator'
+	) {
 		return fc.array(fc.anything(), { maxLength: 10 }).map((arr: any[]) => {
 			if (meta.id === 'iterable') {
 				return { [Symbol.iterator]: () => arr[Symbol.iterator]() };
@@ -314,8 +330,7 @@ function stringArbitrary(js: any, fc: typeof import('fast-check')): any {
 			if (js._isoDatetime) return isoDatetimeArbitrary(js, fc);
 			// Constrain to years 1000–9000 so toISOString() always produces the
 			// standard 4-digit-year format rather than the extended ±YYYYYY form.
-			return safeDateArb(fc)
-				.map((d: Date) => d.toISOString());
+			return safeDateArb(fc).map((d: Date) => d.toISOString());
 		case 'date':
 			return safeDateArb(fc).map((d: Date) => d.toISOString().split('T')[0]!);
 	}
@@ -658,22 +673,31 @@ function objectArbitrary(guard: Guard<any>, fc: typeof import('fast-check')): an
 		if (js.minProperties !== undefined || js.maxProperties !== undefined) {
 			const minLen: number = js.minProperties ?? 0;
 			const maxLen: number = js.maxProperties ?? Math.max(minLen, 5);
-			return fc
-				.array(fc.tuple(fc.string({ minLength: 1, maxLength: 10 }), fc.anything()), {
-					minLength: minLen,
-					maxLength: maxLen,
-				})
-				.map((entries: [string, any][]) => Object.fromEntries(entries));
+			const safeKeyArb = fc
+				.string({ minLength: 1, maxLength: 10 })
+				.filter(k => k !== '__proto__' && k !== 'constructor' && k !== 'prototype');
+			return fc.dictionary(safeKeyArb, fc.anything(), {
+				minKeys: minLen,
+				maxKeys: maxLen,
+			});
 		}
-		return fc.object();
+		return fc.dictionary(
+			fc.string().filter(k => k !== '__proto__' && k !== 'constructor' && k !== 'prototype'),
+			fc.anything()
+		);
 	}
 
 	const record: Record<string, any> = {};
+	// `.partial()` / `.required()` set this set explicitly; if absent, fall back
+	// to per-field `_optional` flags. Aligns the generated arbitrary with
+	// `buildJsonSchema` so AJV agreement holds for partial/required schemas.
+	const optionalOverride = guard.meta['_optionalKeys'] as Set<string> | undefined;
 	for (const [key, fieldGuard] of Object.entries(shape)) {
 		let arb = buildArbitrary(fieldGuard, fc);
 		const fieldJs = fieldGuard.meta.jsonSchema ?? {};
 		if (fieldJs._nullable) arb = fc.oneof(arb, fc.constant(null));
-		if (fieldJs._optional) arb = fc.option(arb, { nil: undefined });
+		const isOptional = optionalOverride ? optionalOverride.has(key) : Boolean(fieldJs._optional);
+		if (isOptional) arb = fc.option(arb, { nil: undefined });
 		record[key] = arb;
 	}
 	return fc.record(record);

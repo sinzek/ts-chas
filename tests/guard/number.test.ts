@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { is } from '../../src/guard/index.js';
-import { InferGuard } from '../../src/guard/shared.js';
+import { InferGuard } from '../../src/guard/base/shared.js';
 
 describe('is.number (v2)', () => {
 	it('basic number validation', () => {

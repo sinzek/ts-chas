@@ -1,30 +1,32 @@
-import { makeGuard, factory, type Guard, type InferGuard, property, transformer, JSON_SCHEMA } from '../shared.js';
+import { type Guard, type InferGuard, JSON_SCHEMA } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { factory, property, transformer } from '../base/helper-markers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-export interface SetHelpers<T, TSet = Set<T>> {
+export interface SetHelpers<T, Modifier extends 'readonly' | null = null> {
 	/** Validates that the set is non-empty. */
-	nonEmpty: Guard<TSet, SetHelpers<T, TSet>>;
+	nonEmpty: SetGuard<T, Modifier>;
 	/** Validates that the set is empty. */
-	empty: Guard<TSet, SetHelpers<T, TSet>>;
+	empty: SetGuard<T, Modifier>;
 	/** Validates that the set has exactly `n` elements. */
-	size: (n: number) => Guard<TSet, SetHelpers<T, TSet>>;
+	size: (n: number) => SetGuard<T, Modifier>;
 	/** Validates that the set has at least `n` elements. */
-	minSize: (n: number) => Guard<TSet, SetHelpers<T, TSet>>;
+	minSize: (n: number) => SetGuard<T, Modifier>;
 	/** Validates that the set has at most `n` elements. */
-	maxSize: (n: number) => Guard<TSet, SetHelpers<T, TSet>>;
+	maxSize: (n: number) => SetGuard<T, Modifier>;
 	/** Validates that the set contains a specific value. */
-	has: (value: T) => Guard<TSet, SetHelpers<T, TSet>>;
+	has: (value: T) => SetGuard<T, Modifier>;
 	/** Validates that the set is a subset of another set or array. */
-	subsetOf: (superset: Iterable<T>) => Guard<TSet, SetHelpers<T, TSet>>;
+	subsetOf: (superset: Iterable<T>) => SetGuard<T, Modifier>;
 	/** Validates that the set is a superset of another set or array. */
-	supersetOf: (subset: Iterable<T>) => Guard<TSet, SetHelpers<T, TSet>>;
+	supersetOf: (subset: Iterable<T>) => SetGuard<T, Modifier>;
 	/** Validates that the set is disjoint from another set or array (no common elements). */
-	disjointFrom: (other: Iterable<T>) => Guard<TSet, SetHelpers<T, TSet>>;
+	disjointFrom: (other: Iterable<T>) => SetGuard<T, Modifier>;
 	/** Validates that the set is readonly. */
-	readonly: Guard<Readonly<TSet>, SetHelpers<T, Readonly<TSet>>>;
+	readonly: SetGuard<T, 'readonly'>;
 }
 
 const setHelpers: SetHelpers<any> = {
@@ -71,16 +73,20 @@ const setHelpers: SetHelpers<any> = {
 // Factory
 // ---------------------------------------------------------------------------
 
-export type SetGuard<T> = Guard<Set<T>, SetHelpers<T>>;
+export interface SetGuard<T, Modifier extends 'readonly' | null = null> extends Guard<
+	Modifier extends 'readonly' ? Readonly<Set<T>> : Set<T>,
+	SetHelpers<T, Modifier>,
+	SetGuard<T, Modifier>
+> {}
 
 export interface SetGuardFactory {
 	/** Creates an unnarrowed Set guard (any value type). */
 	(): SetGuard<unknown>;
 	/** Creates a Set guard with typed values. */
-	<G extends Guard<any>>(valueGuard: G): SetGuard<InferGuard<G>>;
+	<G extends Guard<any, any, any>>(valueGuard: G): SetGuard<InferGuard<G>>;
 }
 
-export const SetGuardFactory: SetGuardFactory = (valueGuard?: Guard<any>) =>
+export const SetGuardFactory: SetGuardFactory = (valueGuard?: Guard<any, any, any>) =>
 	makeGuard(
 		(v: unknown): v is Set<any> => {
 			if (!(v instanceof Set)) return false;

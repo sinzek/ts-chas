@@ -1,7 +1,12 @@
-import { hasForbiddenKey, makeGuard, type Guard } from '../shared.js';
-import { type ObjectHelpers, objectHelpers } from './shared.js';
+import { hasForbiddenKey, type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { type ObjectHelpers, objectHelpers } from './object-helpers.js';
 
-export type RecordGuard<K extends string | number | symbol, V> = Guard<Record<K, V>, ObjectHelpers<Record<K, V>>>;
+export interface RecordGuard<K extends string | number | symbol, V> extends Guard<
+	Record<K, V>,
+	ObjectHelpers<Record<K, V>>,
+	RecordGuard<K, V>
+> {}
 
 /**
  * Creates a Guard that validates an object as a `Record<K, V>`.

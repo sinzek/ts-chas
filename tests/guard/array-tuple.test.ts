@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { is } from '../../src/guard/index.js';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import { is, type InferGuard, type Guard } from '../../src/guard/index.js';
 
 describe('is.array (v2)', () => {
 	it('basic array validation', () => {
@@ -206,6 +206,360 @@ describe('is.array (v2)', () => {
 				expect(typeof s).toBe('string');
 				expect(typeof n).toBe('number');
 			}
+		});
+	});
+
+	describe('Type-level inference', () => {
+		it('is.array() infers unknown[]', () => {
+			const g = is.array();
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<unknown[]>();
+		});
+
+		it('is.array(is.number) infers number[]', () => {
+			const g = is.array(is.number);
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<number[]>();
+		});
+
+		it('is.array(is.string, is.number) infers (string | number)[]', () => {
+			const g = is.array(is.string, is.number);
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<(string | number)[]>();
+		});
+
+		it('is.string.array infers string[] with array helpers', () => {
+			expectTypeOf<InferGuard<typeof is.string.array>>().toEqualTypeOf<string[]>();
+			expectTypeOf<InferGuard<typeof is.number.array>>().toEqualTypeOf<number[]>();
+			expectTypeOf<InferGuard<typeof is.boolean.array>>().toEqualTypeOf<boolean[]>();
+		});
+
+		it('refinements on element guards persist through .array', () => {
+			const g = is.number.positive.array;
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<number[]>();
+			expect(g([1, 2, 3])).toBe(true);
+			expect(g([1, -2, 3])).toBe(false);
+		});
+
+		it('is.array(...).readonly infers readonly T[]', () => {
+			const g = is.array(is.number).readonly;
+			type T = InferGuard<typeof g>;
+			const v: T = [1, 2, 3] as const;
+			expectTypeOf(v).toMatchTypeOf<readonly number[]>();
+		});
+
+		it('is.tuple infers exact positional types', () => {
+			const g = is.tuple([is.string, is.number, is.boolean]);
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<[string, number, boolean]>();
+		});
+
+		it('is.tuple with rest infers [...fixed, ...rest[]]', () => {
+			const g = is.tuple([is.string, is.number], is.boolean);
+
+			type G = typeof g.$infer;
+
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<[string, number, ...boolean[]]>();
+		});
+
+		it('is.tuple([]) is the empty tuple', () => {
+			const g = is.tuple([]);
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<[]>();
+		});
+
+		it('is.tuple([], rest) is variadic with no fixed prefix', () => {
+			const g = is.tuple([], is.string);
+			expectTypeOf<InferGuard<typeof g>>().toEqualTypeOf<string[]>();
+		});
+
+		it('refinements preserve tuple type (no collapse to T[number][])', () => {
+			const g = is.tuple([is.string, is.number]).min(1).unique;
+			type T = InferGuard<typeof g>;
+			expectTypeOf<T>().toEqualTypeOf<[string, number]>();
+			const v: T = ['x', 1];
+			const [s, n] = v;
+			expectTypeOf(s).toEqualTypeOf<string>();
+			expectTypeOf(n).toEqualTypeOf<number>();
+		});
+
+		it('Guard.parse returns Result<T[], GuardErr> for arrays', () => {
+			const g: Guard<number[]> = is.array(is.number);
+			const result = g.parse([1, 2, 3]);
+			if (result.isOk()) {
+				expectTypeOf(result.value).toEqualTypeOf<number[]>();
+			}
+		});
+
+		it('nested array of objects infers correctly', () => {
+			const g = is.array(is.object({ id: is.string, count: is.number }));
+			type T = InferGuard<typeof g>;
+			const v: T = [
+				{ id: 'a', count: 1 },
+				{ id: 'b', count: 2 },
+			];
+			expectTypeOf(v[0]!.id).toEqualTypeOf<string>();
+			expectTypeOf(v[0]!.count).toEqualTypeOf<number>();
+		});
+
+		it('array of arrays infers nested element type', () => {
+			const g = is.array(is.array(is.number));
+			type T = InferGuard<typeof g>;
+			expectTypeOf<T>().toEqualTypeOf<number[][]>();
+		});
+	});
+
+	describe('Complex array runtime cases', () => {
+		it('validates array of objects with deep refinements', () => {
+			const guard = is
+				.array(
+					is.object({
+						id: is.string.uuid(),
+						tags: is.array(is.string).max(5),
+						meta: is.object({ score: is.number.between(0, 100) }).optional,
+					})
+				)
+				.min(1);
+
+			expect(
+				guard([
+					{
+						id: '11111111-1111-4111-8111-111111111111',
+						tags: ['a', 'b'],
+						meta: { score: 50 },
+					},
+				])
+			).toBe(true);
+
+			expect(
+				guard([
+					{
+						id: 'not-a-uuid',
+						tags: ['a'],
+					},
+				])
+			).toBe(false);
+
+			expect(
+				guard([
+					{
+						id: '11111111-1111-4111-8111-111111111111',
+						tags: ['a', 'b'],
+						meta: { score: 150 }, // out of range
+					},
+				])
+			).toBe(false);
+
+			expect(guard([])).toBe(false); // min(1)
+		});
+
+		it('supports recursive array shapes via is.lazy', () => {
+			type Node = { name: string; children: Node[] };
+			const NodeGuard: Guard<Node> = is.object({
+				name: is.string,
+				children: is.lazy(() => is.array(NodeGuard)),
+			});
+
+			expect(
+				NodeGuard({
+					name: 'root',
+					children: [
+						{ name: 'a', children: [] },
+						{ name: 'b', children: [{ name: 'c', children: [] }] },
+					],
+				})
+			).toBe(true);
+
+			expect(
+				NodeGuard({
+					name: 'root',
+					children: [{ name: 42 as any, children: [] }],
+				})
+			).toBe(false);
+		});
+
+		it('.unique on primitives rejects duplicates', () => {
+			expect(is.array(is.number).unique([1, 2, 3])).toBe(true);
+			expect(is.array(is.number).unique([1, 2, 1])).toBe(false);
+			expect(is.array(is.string).unique(['a', 'a'])).toBe(false);
+			expect(is.array().unique([true, false, 1, 'x'])).toBe(true);
+		});
+
+		it('.includes / .excludes work with primitives', () => {
+			const includes = is.array(is.number).includes(42);
+			expect(includes([1, 42, 3])).toBe(true);
+			expect(includes([1, 2, 3])).toBe(false);
+
+			const excludes = is.array(is.number).excludes(0);
+			expect(excludes([1, 2, 3])).toBe(true);
+			expect(excludes([0, 1, 2])).toBe(false);
+		});
+
+		it('.min().max() compose and reject out-of-range lengths', () => {
+			const guard = is.array(is.number).min(2).max(4);
+			expect(guard([1])).toBe(false);
+			expect(guard([1, 2])).toBe(true);
+			expect(guard([1, 2, 3, 4])).toBe(true);
+			expect(guard([1, 2, 3, 4, 5])).toBe(false);
+		});
+
+		it('chained refinement order does not affect result', () => {
+			const a = is.array(is.number).min(2).unique.includes(1);
+			const b = is.array(is.number).includes(1).min(2).unique;
+			const probes: unknown[] = [[1, 2], [1, 1], [2, 3], [1], [1, 2, 3]];
+			for (const v of probes) expect(a(v)).toBe(b(v));
+		});
+
+		it('coerce on the element guard transforms each element on parse', () => {
+			// Element-level coerce is the right place: is.array(is.number.coerce)
+			// transforms each element; is.array(is.number).coerce only coerces the
+			// array container itself (which doesn't apply to a real array input).
+			const guard = is.array(is.number.coerce);
+			const result = guard.parse(['1', '2', '3']);
+			expect(result.isOk()).toBe(true);
+			if (result.isOk()) {
+				expect(result.value).toEqual([1, 2, 3]);
+			}
+		});
+
+		it('rejects non-arrays uniformly', () => {
+			const guard = is.array(is.number);
+			for (const v of [null, undefined, 0, 'arr', { 0: 1, 1: 2, length: 2 }, new Set([1, 2])]) {
+				expect(guard(v)).toBe(false);
+			}
+		});
+
+		it('.readonly narrows to readonly at the type level (does not freeze at runtime)', () => {
+			// .readonly is a type-level guarantee — the runtime value is the parsed
+			// array, unfrozen. Callers who need a frozen runtime value must wrap
+			// with `Object.freeze()` themselves.
+			const guard = is.array(is.number).readonly;
+			const result = guard.parse([1, 2, 3]);
+			expect(result.isOk()).toBe(true);
+			if (result.isOk()) {
+				expect(result.value).toEqual([1, 2, 3]);
+				expectTypeOf(result.value).toEqualTypeOf<readonly number[]>();
+			}
+		});
+	});
+
+	describe('Complex tuple runtime cases', () => {
+		it('rejects tuples of wrong length', () => {
+			const guard = is.tuple([is.string, is.number]);
+			expect(guard(['a', 1])).toBe(true);
+			expect(guard(['a'])).toBe(false);
+			expect(guard(['a', 1, 'extra'])).toBe(false);
+			expect(guard([])).toBe(false);
+		});
+
+		it('rejects tuples of wrong positional types', () => {
+			const guard = is.tuple([is.string, is.number, is.boolean]);
+			expect(guard(['a', 1, true])).toBe(true);
+			expect(guard([1, 'a', true])).toBe(false);
+			expect(guard(['a', 1, 'true'])).toBe(false);
+		});
+
+		it('variadic tuple accepts trailing rest of correct type', () => {
+			const guard = is.tuple([is.string], is.number);
+			expect(guard(['a'])).toBe(true);
+			expect(guard(['a', 1])).toBe(true);
+			expect(guard(['a', 1, 2, 3])).toBe(true);
+			expect(guard(['a', 1, 'x'])).toBe(false); // last is not a number
+			expect(guard([])).toBe(false); // missing fixed prefix
+		});
+
+		it('variadic with empty fixed prefix behaves like an open-ended array', () => {
+			const guard = is.tuple([], is.string);
+			expect(guard([])).toBe(true);
+			expect(guard(['a', 'b'])).toBe(true);
+			expect(guard(['a', 1])).toBe(false);
+		});
+
+		it('nested tuples of objects', () => {
+			const guard = is.tuple([is.object({ name: is.string }), is.tuple([is.number, is.number])]);
+			expect(guard([{ name: 'p' }, [1, 2]])).toBe(true);
+			expect(guard([{ name: 'p' }, [1, '2']])).toBe(false);
+			expect(guard([{ name: 1 }, [1, 2]])).toBe(false);
+		});
+
+		it('tuple with refined element guards (e.g. is.string.email)', () => {
+			const guard = is.tuple([is.string.email, is.number.positive]);
+			expect(guard(['a@b.com', 1])).toBe(true);
+			expect(guard(['not-email', 1])).toBe(false);
+			expect(guard(['a@b.com', 0])).toBe(false);
+		});
+
+		it('.size on a tuple is redundant but consistent with declared length', () => {
+			const t = is.tuple([is.string, is.number]).size(2);
+			expect(t(['x', 1])).toBe(true);
+			// size(3) on a length-2 tuple can never pass.
+			const impossible = is.tuple([is.string, is.number]).size(3);
+			expect(impossible(['x', 1])).toBe(false);
+			expect(impossible(['x', 1, 'y'] as any)).toBe(false);
+		});
+
+		it('.unique on a tuple rejects duplicate elements', () => {
+			const guard = is.tuple([is.number, is.number, is.number]).unique;
+			expect(guard([1, 2, 3])).toBe(true);
+			expect(guard([1, 1, 2])).toBe(false);
+		});
+
+		it('.includes / .excludes apply to tuple elements', () => {
+			const inc = is.tuple([is.string, is.string]).includes('admin');
+			expect(inc(['user', 'admin'])).toBe(true);
+			expect(inc(['user', 'guest'])).toBe(false);
+
+			const exc = is.tuple([is.number, is.number]).excludes(0);
+			expect(exc([1, 2])).toBe(true);
+			expect(exc([0, 2])).toBe(false);
+		});
+
+		it('rejects non-arrays uniformly', () => {
+			const guard = is.tuple([is.string, is.number]);
+			for (const v of [null, undefined, 'a', 1, {}, { 0: 'a', 1: 1, length: 2 }]) {
+				expect(guard(v)).toBe(false);
+			}
+		});
+
+		it('parse() returns the typed tuple unchanged', () => {
+			const guard = is.tuple([is.string, is.number]);
+			const result = guard.parse(['a', 1]);
+			expect(result.isOk()).toBe(true);
+			if (result.isOk()) {
+				const [s, n] = result.value;
+				expect(s).toBe('a');
+				expect(n).toBe(1);
+				expectTypeOf(result.value).toEqualTypeOf<[string, number]>();
+			}
+		});
+	});
+
+	describe('JSON Schema export sanity', () => {
+		it('is.array(T) emits {type: array, items: T}', () => {
+			const schema = is.array(is.number).toJsonSchema();
+			expect(schema).toMatchObject({ type: 'array', items: { type: 'number' } });
+		});
+
+		it('is.array(...).min().max() emits length bounds', () => {
+			const schema = is.array(is.string).min(1).max(10).toJsonSchema();
+			expect(schema).toMatchObject({ type: 'array', minItems: 1, maxItems: 10 });
+		});
+
+		it('is.tuple emits prefixItems with fixed length bounds', () => {
+			const schema = is.tuple([is.string, is.number]).toJsonSchema();
+			expect(schema).toMatchObject({
+				type: 'array',
+				minItems: 2,
+				maxItems: 2,
+			});
+			expect((schema as any).prefixItems).toHaveLength(2);
+		});
+
+		it('variadic tuple emits prefixItems + items for the rest type', () => {
+			const schema = is.tuple([is.string], is.number).toJsonSchema();
+			expect(schema).toMatchObject({
+				type: 'array',
+				minItems: 1,
+				items: { type: 'number' },
+			});
+			expect((schema as any).prefixItems).toHaveLength(1);
+			// No maxItems on variadic tuples.
+			expect((schema as any).maxItems).toBeUndefined();
 		});
 	});
 });

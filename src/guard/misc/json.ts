@@ -1,4 +1,6 @@
-import { makeGuard, type Guard, transformer, property, factory } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { transformer, property, factory } from '../base/helper-markers.js';
 
 /**
  * Default hard caps applied to `is.json` to make it DoS-resistant against
@@ -8,11 +10,7 @@ import { makeGuard, type Guard, transformer, property, factory } from '../shared
 export const JSON_DEFAULT_MAX_DEPTH = 256;
 export const JSON_DEFAULT_MAX_PROPERTIES = 100_000;
 
-function validateJson(
-	value: unknown,
-	maxDepth: number,
-	maxProperties: number
-): boolean {
+function validateJson(value: unknown, maxDepth: number, maxProperties: number): boolean {
 	let propertyCount = 0;
 	const walk = (v: unknown, depth: number): boolean => {
 		if (depth > maxDepth) return false;
@@ -47,29 +45,29 @@ function validateJson(
 
 export interface JsonHelpers {
 	/** Narrows the JSON value to an object. */
-	object: Guard<JsonObject, JsonHelpers>;
+	object: JsonGuard.Object;
 	/** Narrows the JSON value to an array. */
-	array: Guard<JsonArray, JsonHelpers>;
+	array: JsonGuard.Array;
 	/** Narrows the JSON value to a primitive (string, number, boolean, or null). */
-	primitive: Guard<string | number | boolean | null, JsonHelpers>;
+	primitive: JsonGuard.Primitive;
 	/** Transforms the validated JSON value into a string via `JSON.stringify()`. */
-	stringify: Guard<Json, JsonHelpers> & { parse: (v: unknown) => any };
+	stringify: JsonGuard & { parse: (v: unknown) => any };
 	/**
 	 * Overrides the maximum nesting depth allowed (default: {@link JSON_DEFAULT_MAX_DEPTH}).
 	 * Deeper values are rejected to prevent stack overflow on hostile input.
 	 */
-	maxDepth: (n: number) => Guard<Json, JsonHelpers>;
+	maxDepth: (n: number) => JsonGuard;
 	/**
 	 * Overrides the maximum total number of array elements + object property
 	 * values observed across the whole tree (default: {@link JSON_DEFAULT_MAX_PROPERTIES}).
 	 * Prevents memory DoS on payloads that are shallow but wide.
 	 */
-	maxProperties: (n: number) => Guard<Json, JsonHelpers>;
+	maxProperties: (n: number) => JsonGuard;
 	/**
 	 * Disables the default depth/property caps. Use only when the input source is
 	 * trusted — unbounded validation on hostile input is a DoS vector.
 	 */
-	unbounded: Guard<Json, JsonHelpers>;
+	unbounded: JsonGuard;
 }
 
 const jsonHelpers: JsonHelpers = {
@@ -113,7 +111,13 @@ const jsonHelpers: JsonHelpers = {
 	) as any,
 };
 
-export interface JsonGuard extends Guard<Json, JsonHelpers> {}
+export interface JsonGuard extends Guard<Json, JsonHelpers, JsonGuard> {}
+
+export namespace JsonGuard {
+	export interface Object extends Guard<JsonObject, JsonHelpers, JsonGuard.Object> {}
+	export interface Array extends Guard<JsonArray, JsonHelpers, JsonGuard.Array> {}
+	export interface Primitive extends Guard<string | number | boolean | null, JsonHelpers, JsonGuard.Primitive> {}
+}
 
 export const JsonGuard: JsonGuard = makeGuard(
 	(value: unknown): value is Json => validateJson(value, JSON_DEFAULT_MAX_DEPTH, JSON_DEFAULT_MAX_PROPERTIES),

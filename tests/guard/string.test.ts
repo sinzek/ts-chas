@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { is } from '../../src/guard/index.js';
 
 describe('is.string (v2)', () => {
+	const guard = is.string.email;
+
 	it('basic string validation', () => {
 		expect(is.string('foo')).toBe(true);
 		expect(is.string(123)).toBe(false);

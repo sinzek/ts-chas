@@ -26,7 +26,8 @@
  */
 
 import type { TaggedErr } from '../../tagged-errs.js';
-import { makeGuard, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
 /**
  * Identifies a single error factory produced by `defineErrs`.
@@ -44,7 +45,11 @@ type InferFactoriesUnion<T extends Record<string, ErrorFactory>> = T[keyof T] ex
 		: never
 	: never;
 
-export type TaggedErrGuard<T extends string> = Guard<TaggedErr & { readonly _tag: T }>;
+export interface TaggedErrGuard<T extends string> extends Guard<
+	TaggedErr & { readonly _tag: T },
+	{},
+	TaggedErrGuard<T>
+> {}
 
 export interface TaggedErrGuardFactory {
 	/**

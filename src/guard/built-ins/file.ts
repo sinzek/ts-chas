@@ -1,4 +1,6 @@
-import { makeGuard, factory, type Guard } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { factory } from '../base/helper-markers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -6,19 +8,19 @@ import { makeGuard, factory, type Guard } from '../shared.js';
 
 export interface FileHelpers {
 	/** Validates the MIME type of the file. */
-	type: (mime: string | RegExp) => Guard<Blob, FileHelpers>;
+	type: (mime: string | RegExp) => FileGuard;
 	/** Validates the file extension (e.g., '.pdf', 'jpg'). */
-	extension: (ext: string | string[]) => Guard<Blob, FileHelpers>;
+	extension: (ext: string | string[]) => FileGuard;
 	/** Validates the exact size of the file in bytes. */
-	size: (bytes: number) => Guard<Blob, FileHelpers>;
+	size: (bytes: number) => FileGuard;
 	/** Validates the minimum size of the file in bytes. */
-	minSize: (bytes: number) => Guard<Blob, FileHelpers>;
+	minSize: (bytes: number) => FileGuard;
 	/** Validates the maximum size of the file in bytes. */
-	maxSize: (bytes: number) => Guard<Blob, FileHelpers>;
+	maxSize: (bytes: number) => FileGuard;
 	/** Validates the name of the file (only if it's a File object, not a Blob). */
-	name: (pattern: string | RegExp) => Guard<Blob, FileHelpers>;
+	name: (pattern: string | RegExp) => FileGuard;
 	/** Validates the last modified date of the file (only if it's a File object). */
-	lastModified: (date: Date | number) => Guard<Blob, FileHelpers>;
+	lastModified: (date: Date | number) => FileGuard;
 }
 
 const fileHelpers: FileHelpers = {
@@ -49,7 +51,7 @@ const fileHelpers: FileHelpers = {
 	}),
 };
 
-export interface FileGuard extends Guard<Blob, FileHelpers> {}
+export interface FileGuard extends Guard<Blob, FileHelpers, FileGuard> {}
 
 /**
  * Validates that a value is a File or Blob.

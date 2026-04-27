@@ -24,7 +24,9 @@
 
 import { isResult, type Result } from '../../result/result.js';
 import type { Err, Ok } from '../../result/shared.js';
-import { makeGuard, transformer, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { transformer } from '../base/helper-markers.js';
 
 export interface ResultHelpers<T = unknown, E = unknown> {
 	/**
@@ -40,8 +42,8 @@ export interface ResultHelpers<T = unknown, E = unknown> {
 	 * ```
 	 */
 	ok: {
-		(): Guard<Ok<T> & Result<T, never>>;
-		<G extends Guard<any>>(innerGuard: G): Guard<Ok<InferGuard<G>> & Result<InferGuard<G>, never>>;
+		(): OkGuard<T>;
+		<G extends Guard<any, any, any>>(innerGuard: G): OkGuard<InferGuard<G>>;
 	};
 
 	/**
@@ -57,8 +59,8 @@ export interface ResultHelpers<T = unknown, E = unknown> {
 	 * ```
 	 */
 	err: {
-		(): Guard<Err<E> & Result<never, E>>;
-		<G extends Guard<any>>(innerGuard: G): Guard<Err<InferGuard<G>> & Result<never, InferGuard<G>>>;
+		(): ErrGuard<E>;
+		<G extends Guard<any, any, any>>(innerGuard: G): ErrGuard<InferGuard<G>>;
 	};
 }
 
@@ -86,13 +88,15 @@ export interface ResultGuardFactory {
 	/** Creates an unnarrowed Result guard. */
 	(): ResultGuard<unknown, unknown>;
 	/** Creates a Result guard narrowed by Ok value and Err error types. */
-	<OkG extends Guard<any>, ErrG extends Guard<any>>(
+	<OkG extends Guard<any, any, any>, ErrG extends Guard<any, any, any>>(
 		okGuard: OkG,
 		errGuard: ErrG
 	): ResultGuard<InferGuard<OkG>, InferGuard<ErrG>>;
 }
 
-export type ResultGuard<T, E> = Guard<Result<T, E>, ResultHelpers<T, E>>;
+export interface ResultGuard<T, E> extends Guard<Result<T, E>, ResultHelpers<T, E>, ResultGuard<T, E>> {}
+export interface OkGuard<T> extends Guard<Ok<T> & ResultHelpers<T, never>, {}, OkGuard<T>> {}
+export interface ErrGuard<E> extends Guard<Err<E> & ResultHelpers<never, E>, {}, ErrGuard<E>> {}
 
 export const ResultGuardFactory: ResultGuardFactory = (
 	okGuard?: Guard<any, Record<string, any>>,

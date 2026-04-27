@@ -131,4 +131,68 @@ describe('fallback helper', () => {
 			expect(TupleSchema.parse({ data: ['ok', 'bad'] }).isErr()).toBe(true);
 		});
 	});
+
+	describe('transform error catching', () => {
+		it('catches transform errors in .parse() when fallback is set', () => {
+			const guard = is.string
+				.transform(() => {
+					throw new Error('boom');
+				})
+				.fallback('safe');
+			const result = guard.parse('hello');
+			expect(result.isOk()).toBe(true);
+			expect(result.unwrap()).toBe('safe');
+		});
+
+		it('still throws transform errors in .parse() when no fallback', () => {
+			const guard = is.string.transform(() => {
+				throw new Error('boom');
+			});
+			expect(() => guard.parse('hello')).toThrow('boom');
+		});
+
+		it('catches transform errors in .assert() when fallback is set', () => {
+			const guard = is.string
+				.transform(() => {
+					throw new Error('boom');
+				})
+				.fallback('safe');
+			expect(guard.assert('hello')).toBe('safe');
+		});
+
+		it('still throws transform errors in .assert() when no fallback', () => {
+			const guard = is.string.transform(() => {
+				throw new Error('boom');
+			});
+			expect(() => guard.assert('hello')).toThrow('boom');
+		});
+
+		it('catches transform errors via ~standard validate when fallback is set', () => {
+			const guard = is.string
+				.transform(() => {
+					throw new Error('boom');
+				})
+				.fallback('safe');
+			const result = (guard as any)['~standard'].validate('hello');
+			expect(result).toEqual({ value: 'safe' });
+		});
+
+		it('catches transform errors in schema validation when fallback is set', () => {
+			const Schema = defineSchema('Test', {
+				value: is.string
+					.transform(() => {
+						throw new Error('boom');
+					})
+					.fallback('safe'),
+			});
+			const result = Schema.parse({ value: 'hello' });
+			expect(result.isOk()).toBe(true);
+			expect(result.unwrap()).toEqual({ value: 'safe' });
+		});
+
+		it('fallback does not change boolean predicate behavior', () => {
+			const guard = is.string.fallback('default');
+			expect(guard(123)).toBe(false); // still false, fallback only affects parse/assert
+		});
+	});
 });

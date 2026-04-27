@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { is } from '../../src/guard/index.js';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import { is, type InferGuard, type Guard } from '../../src/guard/index.js';
 import { defineErrs } from '../../src/tagged-errs.js';
 import { some } from '../../src/option.js';
 import { ok } from '../../src/result/result.js';
@@ -547,6 +547,498 @@ describe('is.object (v2)', () => {
 			const guard = is.object({ ...base.meta.shape, b: is.number });
 			expect(guard.strict({ a: 'hello', b: 1 })).toBe(true);
 			expect(guard.strict({ a: 'hello', b: 1, c: 2 })).toBe(false);
+		});
+	});
+
+	describe('Type-level inference', () => {
+		it('infers required and optional fields correctly', () => {
+			const guard = is.object({
+				name: is.string,
+				age: is.number,
+				email: is.string.optional,
+				bio: is.string.nullable,
+			});
+			type T = InferGuard<typeof guard>;
+			const value: T = { name: 'a', age: 1, bio: null };
+			expectTypeOf(value).toMatchTypeOf<{ name: string; age: number; bio: string | null }>();
+			// `email` is optional — assigning either a string or omitting it should compile.
+			const withEmail: T = { name: 'a', age: 1, bio: null, email: 'x' };
+			expect(withEmail.email).toBe('x');
+		});
+
+		it('.partial() makes every field optional in the inferred type', () => {
+			const guard = is.object({ a: is.string, b: is.number }).partial();
+			type T = InferGuard<typeof guard>;
+			// All keys may be omitted.
+			const empty: T = {};
+			const partial: T = { a: 'x' };
+			const full: T = { a: 'x', b: 1 };
+			expect([empty, partial, full].every(v => guard(v))).toBe(true);
+		});
+
+		it('.partial(specific) makes only the listed keys optional', () => {
+			const guard = is.object({ a: is.string, b: is.number, c: is.boolean }).partial('b');
+			type T = InferGuard<typeof guard>;
+			// `a` and `c` are required; `b` is optional.
+			const v: T = { a: 'x', c: true };
+			expectTypeOf(v).toMatchTypeOf<{ a: string; c: boolean }>();
+			// @ts-expect-error — `a` is required
+			const missingA: T = { b: 1, c: true };
+			expect(missingA).toBeDefined();
+		});
+
+		it('.required() strips both ? and | undefined from each field', () => {
+			const guard = is.object({ a: is.string.optional, b: is.number.optional }).required();
+			type T = InferGuard<typeof guard>;
+			const v: T = { a: 'x', b: 1 };
+			// The `| undefined` introduced by `.optional` is removed by `.required()`,
+			// mirroring `partial`'s behavior in reverse and matching the runtime,
+			// which rejects undefined values.
+			expectTypeOf(v.a).toEqualTypeOf<string>();
+			expectTypeOf(v.b).toEqualTypeOf<number>();
+			// @ts-expect-error — undefined is no longer assignable to a required field
+			const bad: T = { a: undefined, b: 1 };
+			expect(bad).toBeDefined();
+			expect(guard({ a: 'x', b: 1 })).toBe(true);
+			expect(guard({ a: undefined as any, b: undefined as any })).toBe(false);
+		});
+
+		it('.required(specific) strips ? and | undefined only on listed keys', () => {
+			const guard = is
+				.object({ a: is.string.optional, b: is.number.optional, c: is.boolean.optional })
+				.required('a');
+			type T = InferGuard<typeof guard>;
+			const v: T = { a: 'x' };
+			expectTypeOf(v.a).toEqualTypeOf<string>();
+			expectTypeOf(v.b).toEqualTypeOf<number | undefined>();
+			expectTypeOf(v.c).toEqualTypeOf<boolean | undefined>();
+		});
+
+		it('.pick narrows the inferred type to the chosen keys', () => {
+			const base = is.object({ a: is.string, b: is.number, c: is.boolean });
+			const picked = base.pick(['a', 'c']);
+			type T = InferGuard<typeof picked>;
+			const v: T = { a: 'x', c: true };
+			expectTypeOf(v).toEqualTypeOf<{ a: string; c: boolean }>();
+		});
+
+		it('.omit removes the listed keys from the inferred type', () => {
+			const base = is.object({ a: is.string, b: is.number, c: is.boolean });
+			const omitted = base.omit(['b']);
+			type T = InferGuard<typeof omitted>;
+			const v: T = { a: 'x', c: true };
+			expectTypeOf(v).toEqualTypeOf<{ a: string; c: boolean }>();
+		});
+
+		it('.extend produces the intersection of both shapes', () => {
+			const base = is.object({ a: is.string });
+			const ext = base.extend({ b: is.number, c: is.boolean });
+			type T = InferGuard<typeof ext>;
+			const v: T = { a: 'x', b: 1, c: true };
+			expectTypeOf(v).toEqualTypeOf<{ a: string; b: number; c: boolean }>();
+		});
+
+		it('.keyof narrows to the union of schema keys', () => {
+			const guard = is.object({ name: is.string, age: is.number });
+			const k = guard.keyof;
+			type K = InferGuard<typeof k>;
+			expectTypeOf<K>().toEqualTypeOf<'name' | 'age'>();
+		});
+
+		it('.has(key, guard) widens the inferred type with the new key', () => {
+			const base = is.object({ a: is.string });
+			const widened = base.has('b', is.number);
+			type T = InferGuard<typeof widened>;
+			const v: T = { a: 'x', b: 1 };
+			expectTypeOf(v).toMatchObjectType<{ a: string; b: number }>();
+		});
+
+		it('.catchall<V> adds an index signature of V to the inferred type', () => {
+			const guard = is.object({ a: is.string }).catchall(is.number);
+			type T = InferGuard<typeof guard>;
+			// TypeScript strictly checks object literals against index signatures and will reject
+			// `{ a: 'x' }` against `Record<string, number>`. However, the intersection type
+			// `{ a: string } & Record<string, number>` works perfectly for property access.
+			const v = { a: 'x', extra: 5, anotherKey: 99 } as unknown as T;
+			expectTypeOf(v.a).toEqualTypeOf<string>();
+			expectTypeOf(v['extra']).toEqualTypeOf<number>();
+		});
+
+		it('nested object guards infer nested shapes', () => {
+			const guard = is.object({
+				user: is.object({
+					name: is.string,
+					address: is.object({
+						street: is.string,
+						city: is.string,
+					}),
+				}),
+			});
+			type T = InferGuard<typeof guard>;
+			const v: T = {
+				user: {
+					name: 'a',
+					address: { street: 's', city: 'c' },
+				},
+			};
+			expectTypeOf(v.user.address.street).toEqualTypeOf<string>();
+			expectTypeOf(v.user.address.city).toEqualTypeOf<string>();
+		});
+
+		it('discriminated unions infer as a union of object variants', () => {
+			const guard = is.discriminatedUnion('kind', {
+				circle: is.object({ radius: is.number }),
+				square: is.object({ side: is.number }),
+			});
+			type T = InferGuard<typeof guard>;
+			// Each variant must be assignable to T.
+			const c: T = { kind: 'circle', radius: 5 };
+			const s: T = { kind: 'square', side: 3 };
+			expectTypeOf(c).toExtend<T>();
+			expectTypeOf(s).toExtend<T>();
+			// And foreign discriminant values must NOT be assignable.
+			// @ts-expect-error — 'triangle' is not in the variant map
+			const t: T = { kind: 'triangle', base: 1 };
+			expect(t).toBeDefined();
+			expect(guard(c)).toBe(true);
+			expect(guard(s)).toBe(true);
+		});
+
+		it('Guard.parse returns Result<T, GuardErr> with proper narrowing', () => {
+			const guard: Guard<{ a: string }> = is.object({ a: is.string });
+			const result = guard.parse({ a: 'x' });
+			if (result.isOk()) {
+				expectTypeOf(result.value).toEqualTypeOf<{ a: string }>();
+			}
+		});
+	});
+
+	describe('Deep nesting & complex shapes', () => {
+		it('validates 3-level deep objects with mixed optionality', () => {
+			const guard = is.object({
+				outer: is.object({
+					mid: is.object({
+						leaf: is.string.min(1),
+						count: is.number.int.optional,
+					}),
+				}),
+			});
+			expect(guard({ outer: { mid: { leaf: 'x' } } })).toBe(true);
+			expect(guard({ outer: { mid: { leaf: 'x', count: 3 } } })).toBe(true);
+			expect(guard({ outer: { mid: { leaf: '' } } })).toBe(false); // min(1)
+			expect(guard({ outer: { mid: { leaf: 'x', count: 1.5 } } })).toBe(false); // int
+			expect(guard({ outer: {} } as any)).toBe(false); // missing mid
+		});
+
+		it('supports recursive guards via is.lazy', () => {
+			type Tree = { value: number; children: Tree[] };
+			const Tree: Guard<Tree> = is.object({
+				value: is.number,
+				children: is.lazy(() => is.array(Tree)),
+			});
+
+			expect(
+				Tree({
+					value: 1,
+					children: [
+						{ value: 2, children: [] },
+						{ value: 3, children: [{ value: 4, children: [] }] },
+					],
+				})
+			).toBe(true);
+
+			expect(Tree({ value: 1, children: [{ value: 'bad' as any, children: [] }] })).toBe(false);
+		});
+
+		it('supports mutually-recursive guards', () => {
+			type Folder = { name: string; entries: (Folder | File)[] };
+			type File = { name: string; size: number };
+
+			const FileGuard: Guard<File> = is.object({ name: is.string, size: is.number });
+			const FolderGuard: Guard<Folder> = is.object({
+				name: is.string,
+				entries: is.lazy(() => is.array(is.union(FolderGuard, FileGuard))),
+			});
+
+			const root: Folder = {
+				name: 'root',
+				entries: [
+					{ name: 'readme.md', size: 42 },
+					{
+						name: 'src',
+						entries: [{ name: 'index.ts', size: 1024 }],
+					},
+				],
+			};
+			expect(FolderGuard(root)).toBe(true);
+			expect(FolderGuard({ name: 'x', entries: [{ name: 'y', size: '10' }] } as any)).toBe(false);
+		});
+
+		it('handles a realistic nested API response', () => {
+			const Response = is.object({
+				status: is.literal('ok', 'error'),
+				data: is.union(
+					is.object({
+						items: is
+							.array(
+								is.object({
+									id: is.string.uuid(),
+									tags: is.array(is.string).max(10),
+								})
+							)
+							.min(1),
+						page: is.number.int.nonnegative,
+					}),
+					is.object({
+						message: is.string.min(1),
+					})
+				),
+			});
+
+			expect(
+				Response({
+					status: 'ok',
+					data: {
+						items: [{ id: '11111111-1111-4111-8111-111111111111', tags: ['a', 'b'] }],
+						page: 0,
+					},
+				})
+			).toBe(true);
+
+			expect(
+				Response({
+					status: 'error',
+					data: { message: 'something went wrong' },
+				})
+			).toBe(true);
+
+			expect(
+				Response({
+					status: 'ok',
+					data: {
+						items: [],
+						page: 0,
+					},
+				})
+			).toBe(false); // items min(1)
+		});
+	});
+
+	describe('Reshape composition & order independence', () => {
+		it('.partial().required() recovers original required-ness', () => {
+			const base = is.object({ a: is.string, b: is.number });
+			const round = base.partial().required();
+			expect(round({ a: 'x', b: 1 })).toBe(true);
+			expect(round({ a: 'x' })).toBe(false);
+			expect(round({})).toBe(false);
+		});
+
+		it('.required().partial() makes every key optional again', () => {
+			const base = is.object({ a: is.string.optional, b: is.number });
+			const round = base.required().partial();
+			expect(round({})).toBe(true);
+			expect(round({ a: 'x' })).toBe(true);
+			expect(round({ a: 'x', b: 1 })).toBe(true);
+			expect(round({ a: 1 } as any)).toBe(false); // wrong type still rejected
+		});
+
+		it('.pick(keys).pick(subset) === .pick(subset)', () => {
+			const base = is.object({ a: is.string, b: is.number, c: is.boolean });
+			const chained = base.pick(['a', 'b']).pick(['a']);
+			const direct = base.pick(['a']);
+			const probes: unknown[] = [{ a: 'x' }, { a: 'x', b: 1 }, { b: 1 }, {}, { a: 1 }];
+			for (const v of probes) expect(chained(v)).toBe(direct(v));
+		});
+
+		it('.omit(a).omit(b) === .omit([a, b])', () => {
+			const base = is.object({ a: is.string, b: is.number, c: is.boolean });
+			const chained = base.omit(['c']).omit(['b']);
+			const direct = base.omit(['b', 'c']);
+			const probes: unknown[] = [{ a: 'x' }, { a: 'x', b: 1 }, { a: 'x', c: true }, {}];
+			for (const v of probes) expect(chained(v)).toBe(direct(v));
+		});
+
+		it('.pick then .extend re-adds the dropped key with a fresh type', () => {
+			const base = is.object({ a: is.string, b: is.number });
+			const reshaped = base.pick(['a']).extend({ b: is.boolean });
+			expect(reshaped({ a: 'x', b: true })).toBe(true);
+			expect(reshaped({ a: 'x', b: 1 })).toBe(false);
+		});
+
+		it('.extend can override an existing field with a stricter guard', () => {
+			const base = is.object({ a: is.string });
+			const stricter = base.extend({ a: is.string.min(3).max(5) });
+			expect(stricter({ a: 'abcd' })).toBe(true);
+			expect(stricter({ a: 'ab' })).toBe(false);
+			expect(stricter({ a: 'abcdef' })).toBe(false);
+		});
+
+		// KNOWN ASYMMETRY: `.strict.partial()` correctly treats every key as optional,
+		// but `.partial().strict` re-validates every schema key as required. The
+		// `strict` transformer rebuilds its predicate from `meta.shape` instead of
+		// delegating to the parent guard, so it ignores any partial state set above.
+		// Pinned with `it.fails` so a future fix flips it.
+		it.fails('.strict.partial vs .partial.strict produce equivalent runtime behavior', () => {
+			const a = is.object({ a: is.string, b: is.number }).strict.partial();
+			const b = is.object({ a: is.string, b: is.number }).partial().strict;
+			const probes: unknown[] = [{}, { a: 'x' }, { a: 'x', b: 1 }, { a: 'x', extra: 1 }, { a: 1 }];
+			for (const v of probes) expect(a(v)).toBe(b(v));
+		});
+
+		it('.strict.partial allows missing keys (partial wins over strict order)', () => {
+			const guard = is.object({ a: is.string, b: is.number }).strict.partial();
+			expect(guard({})).toBe(true);
+			expect(guard({ a: 'x' })).toBe(true);
+			expect(guard({ a: 'x', b: 1 })).toBe(true);
+			expect(guard({ a: 'x', extra: 1 })).toBe(false); // strict still rejects extras
+		});
+	});
+
+	describe('keyof reflects the current schema after reshapes', () => {
+		it('after .extend, keyof includes the new keys', () => {
+			const guard = is.object({ a: is.string }).extend({ b: is.number });
+			const k = guard.keyof;
+			expect(k('a')).toBe(true);
+			expect(k('b')).toBe(true);
+			expect(k('c')).toBe(false);
+		});
+
+		it('after .pick, keyof is restricted to picked keys', () => {
+			const guard = is.object({ a: is.string, b: is.number, c: is.boolean }).pick(['a']);
+			const k = guard.keyof;
+			expect(k('a')).toBe(true);
+			expect(k('b')).toBe(false);
+			expect(k('c')).toBe(false);
+		});
+
+		it('after .omit, keyof drops the omitted keys', () => {
+			const guard = is.object({ a: is.string, b: is.number }).omit(['b']);
+			const k = guard.keyof;
+			expect(k('a')).toBe(true);
+			expect(k('b')).toBe(false);
+		});
+	});
+
+	describe('catchall & strip semantics', () => {
+		it('.catchall validates extra keys against the catchall guard', () => {
+			const guard = is.object({ name: is.string }).catchall(is.number.int.nonnegative);
+			expect(guard({ name: 'Alice', age: 30, score: 100 })).toBe(true);
+			expect(guard({ name: 'Alice', age: -1 })).toBe(false); // catchall rejects
+			expect(guard({ name: 'Alice', age: 'thirty' })).toBe(false);
+		});
+
+		it('.catchall composed with object guards in extra-key positions', () => {
+			const guard = is.object({ name: is.string }).catchall(is.object({ tag: is.literal('a', 'b') }));
+			expect(guard({ name: 'x', m1: { tag: 'a' }, m2: { tag: 'b' } })).toBe(true);
+			expect(guard({ name: 'x', m1: { tag: 'c' } } as any)).toBe(false);
+		});
+
+		it('.strip discards extra keys via .parse() transform', () => {
+			const guard = is.object({ a: is.string, b: is.number }).strip;
+			const result = guard.parse({ a: 'x', b: 1, c: 'extra', d: 99 });
+			expect(result.isOk()).toBe(true);
+			if (result.isOk()) {
+				expect(result.value).toEqual({ a: 'x', b: 1 });
+				expect(Object.keys(result.value)).toEqual(['a', 'b']);
+			}
+		});
+
+		it('.strip on frozen input does not throw', () => {
+			const guard = is.object({ a: is.string }).strip;
+			const frozen = Object.freeze({ a: 'x', extra: 1 });
+			expect(() => guard.parse(frozen)).not.toThrow();
+			const result = guard.parse(frozen);
+			if (result.isOk()) {
+				expect(Object.isFrozen(result.value)).toBe(false); // strip returns a fresh object
+				expect(result.value).toEqual({ a: 'x' });
+			}
+		});
+	});
+
+	describe('Refinement chain semantics', () => {
+		it('.where chained after a reshape applies only to the reshaped guard', () => {
+			const base = is.object({ a: is.string, b: is.number });
+			const onlyA = base.pick(['a']).where(v => v.a.startsWith('A'));
+			expect(onlyA({ a: 'Apple' })).toBe(true);
+			expect(onlyA({ a: 'banana' })).toBe(false);
+			expect(base({ a: 'banana', b: 1 })).toBe(true);
+		});
+
+		it('multiple .where short-circuit in declaration order', () => {
+			let firstCalls = 0;
+			let secondCalls = 0;
+			const guard = is
+				.object({ a: is.number })
+				.where(v => {
+					firstCalls++;
+					return v.a >= 0;
+				})
+				.where(v => {
+					secondCalls++;
+					return v.a < 100;
+				});
+			expect(guard({ a: -1 })).toBe(false);
+			expect(firstCalls).toBe(1);
+			expect(secondCalls).toBe(0);
+		});
+
+		it('.size and .partial together: distinguish failure modes', () => {
+			const guard = is.object({ a: is.string, b: is.number }).size(2).partial();
+			expect(guard({ a: 'x', b: 1 })).toBe(true);
+			expect(guard({ a: 'x' })).toBe(false); // size: 1 ≠ 2
+			expect(guard({})).toBe(false); // size: 0 ≠ 2
+			expect(guard({ a: 'x', b: 1, c: true } as any)).toBe(false); // extra
+		});
+
+		it('.minSize and .maxSize compose into a range', () => {
+			const guard = is.object().minSize(2).maxSize(4);
+			expect(guard({ a: 1, b: 2 })).toBe(true);
+			expect(guard({ a: 1, b: 2, c: 3, d: 4 })).toBe(true);
+			expect(guard({ a: 1 })).toBe(false);
+			expect(guard({ a: 1, b: 2, c: 3, d: 4, e: 5 })).toBe(false);
+		});
+	});
+
+	describe('Edge cases', () => {
+		it('rejects arrays even when their schema would otherwise match', () => {
+			// Arrays have numeric keys + length, so an empty schema "could" structurally
+			// match []. Confirm the guard explicitly rejects arrays.
+			const guard = is.object({});
+			expect(guard([])).toBe(false);
+			expect(guard([1, 2])).toBe(false);
+		});
+
+		it('handles Object.create(null) (no prototype)', () => {
+			const noProto: Record<string, unknown> = Object.create(null);
+			noProto.a = 'x';
+			noProto.b = 1;
+			const guard = is.object({ a: is.string, b: is.number });
+			expect(guard(noProto)).toBe(true);
+		});
+
+		it('handles symbol keys without confusion', () => {
+			const sym = Symbol('s');
+			const obj = { a: 'x', [sym]: 'hidden' };
+			const guard = is.object({ a: is.string });
+			// Symbol keys aren't enumerated by Object.keys, so strict still passes.
+			expect(guard.strict(obj)).toBe(true);
+		});
+
+		it('rejects null and undefined consistently across reshapes', () => {
+			const base = is.object({ a: is.string });
+			for (const reshape of [
+				base,
+				base.partial(),
+				base.required(),
+				base.pick(['a']),
+				base.omit([]),
+				base.extend({ b: is.number.optional }),
+				base.strict,
+				base.catchall(is.number),
+			]) {
+				expect(reshape(null)).toBe(false);
+				expect(reshape(undefined)).toBe(false);
+			}
 		});
 	});
 });

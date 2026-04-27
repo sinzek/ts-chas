@@ -1,9 +1,9 @@
-import { makeGuard, type Guard } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
-export type LiteralGuard<T extends readonly (string | number | boolean | bigint | null | undefined)[]> = Guard<
-	T[number],
-	typeof literalHelpers
->;
+export interface LiteralGuard<
+	T extends readonly (string | number | boolean | bigint | null | undefined)[],
+> extends Guard<T[number], typeof literalHelpers, LiteralGuard<T>> {}
 
 export interface LiteralGuardFactory {
 	<T extends readonly (string | number | boolean | bigint | null | undefined)[]>(...values: T): LiteralGuard<T>;

@@ -25,7 +25,9 @@
  */
 
 import type { Option, Some, None } from '../../option.js';
-import { makeGuard, property, transformer, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { property, transformer } from '../base/helper-markers.js';
 
 // ---------------------------------------------------------------------------
 // Runtime detection
@@ -63,8 +65,8 @@ export interface OptionHelpers<T = unknown> {
 	 * ```
 	 */
 	some: {
-		(): Guard<Some<T>>;
-		<G extends Guard<any>>(innerGuard: G): Guard<Some<InferGuard<G>>>;
+		(): SomeGuard<T>;
+		<G extends Guard<any, any, any>>(innerGuard: G): SomeGuard<InferGuard<G>>;
 	};
 
 	/**
@@ -77,7 +79,7 @@ export interface OptionHelpers<T = unknown> {
 	 * is.option().none(some(42));  // false
 	 * ```
 	 */
-	none: Guard<None>;
+	none: NoneGuard;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,10 +118,12 @@ export interface OptionGuardFactory {
 	/** Creates an unnarrowed Option guard. */
 	(): OptionGuard<unknown>;
 	/** Creates an Option guard narrowed by the Some value type. */
-	<G extends Guard<any>>(innerGuard: G): OptionGuard<InferGuard<G>>;
+	<G extends Guard<any, any, any>>(innerGuard: G): OptionGuard<InferGuard<G>>;
 }
 
-export type OptionGuard<T> = Guard<Option<T>, OptionHelpers<T>>;
+export interface OptionGuard<T> extends Guard<Option<T>, OptionHelpers<T>, OptionGuard<T>> {}
+export interface SomeGuard<T> extends Guard<Some<T>, {}, SomeGuard<T>> {}
+export interface NoneGuard extends Guard<None, {}, NoneGuard> {}
 
 export const OptionGuardFactory: OptionGuardFactory = (innerGuard?: Guard<any, Record<string, any>>) =>
 	makeGuard(

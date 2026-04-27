@@ -1,6 +1,7 @@
-import { makeGuard, type Guard } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
-export interface PromiseGuard extends Guard<Promise<unknown>> {}
+export interface PromiseGuard extends Guard<Promise<unknown>, {}, PromiseGuard> {}
 
 export const PromiseGuard: PromiseGuard = makeGuard(
 	(v: unknown): v is Promise<unknown> =>

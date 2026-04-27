@@ -1,4 +1,5 @@
-import { makeGuard, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
 /**
  * Infers the output type of a discriminated union.
@@ -10,9 +11,11 @@ export type DiscriminatedUnionType<K extends string, M extends Record<string, Gu
 	[D in keyof M & string]: InferGuard<M[D]> & { [key in K]: D };
 }[keyof M & string];
 
-export type DiscriminatedUnionGuard<K extends string, M extends Record<string, Guard<any>>> = Guard<
-	DiscriminatedUnionType<K, M>
->;
+export interface DiscriminatedUnionGuard<K extends string, M extends Record<string, Guard<any>>> extends Guard<
+	DiscriminatedUnionType<K, M>,
+	{},
+	DiscriminatedUnionGuard<K, M>
+> {}
 
 export interface DiscriminatedUnionGuardFactory {
 	<K extends string, M extends Record<string, Guard<any>>>(key: K, variants: M): DiscriminatedUnionGuard<K, M>;

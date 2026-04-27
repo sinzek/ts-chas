@@ -1,6 +1,8 @@
-import { makeGuard, type Guard, factory } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { factory } from '../base/helper-markers.js';
 
-export type RegExpGuard = Guard<RegExp, RegExpHelpers>;
+export interface RegExpGuard extends Guard<RegExp, RegExpHelpers, RegExpGuard> {}
 
 export interface RegExpGuardFactory {
 	/** Base guard — matches any RegExp. */
@@ -13,23 +15,23 @@ export interface RegExpGuardFactory {
 
 export interface RegExpHelpers {
 	/** Validates that the RegExp has the 'g' (global) flag. */
-	global: Guard<RegExp, RegExpHelpers>;
+	global: RegExpGuard;
 	/** Validates that the RegExp has the 'i' (ignoreCase) flag. */
-	ignoreCase: Guard<RegExp, RegExpHelpers>;
+	ignoreCase: RegExpGuard;
 	/** Validates that the RegExp has the 'm' (multiline) flag. */
-	multiline: Guard<RegExp, RegExpHelpers>;
+	multiline: RegExpGuard;
 	/** Validates that the RegExp has the 'u' (unicode) flag. */
-	unicode: Guard<RegExp, RegExpHelpers>;
+	unicode: RegExpGuard;
 	/** Validates that the RegExp has the 'y' (sticky) flag. */
-	sticky: Guard<RegExp, RegExpHelpers>;
+	sticky: RegExpGuard;
 	/** Validates that the RegExp has the 's' (dotAll) flag. */
-	dotAll: Guard<RegExp, RegExpHelpers>;
+	dotAll: RegExpGuard;
 	/** Validates that the RegExp's source matches the given pattern. */
-	source: (pattern: string | RegExp) => Guard<RegExp, RegExpHelpers>;
+	source: (pattern: string | RegExp) => RegExpGuard;
 	/** Validates that the RegExp matches the given string. */
-	test: (v: string) => Guard<RegExp, RegExpHelpers>;
+	test: (v: string) => RegExpGuard;
 	/** Validates that the RegExp has exactly the specified flags. */
-	flags: (flags: string) => Guard<RegExp, RegExpHelpers>;
+	flags: (flags: string) => RegExpGuard;
 }
 
 const regexpHelpers: RegExpHelpers = {

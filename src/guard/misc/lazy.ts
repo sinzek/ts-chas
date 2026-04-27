@@ -1,9 +1,10 @@
-import { makeGuard, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
-export type LazyGuard<T> = Guard<T>;
+export interface LazyGuard<T> extends Guard<T, {}, LazyGuard<T>> {}
 
 export interface LazyGuardFactory {
-	<G extends Guard<any>>(fn: () => G): LazyGuard<InferGuard<G>>;
+	<G extends Guard<any, any, any>>(fn: () => G): LazyGuard<InferGuard<G>>;
 }
 
 /**
@@ -40,7 +41,7 @@ export interface LazyGuardFactory {
  * });
  * ```
  */
-export const LazyGuardFactory: LazyGuardFactory = <G extends Guard<any>>(fn: () => G) => {
+export const LazyGuardFactory: LazyGuardFactory = <G extends Guard<any, any, any>>(fn: () => G) => {
 	let resolved: G | undefined;
 
 	const resolve = (): G => {

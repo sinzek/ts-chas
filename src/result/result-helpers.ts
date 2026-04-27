@@ -1,4 +1,4 @@
-import type { Guard } from '../guard/shared.js';
+import type { Guard } from '../guard/base/shared.js';
 import { GlobalErrs } from '../tagged-errs.js';
 import { err, isResult, ok, ResultAsync, ResultMethodsProto, type Result } from './result.js';
 import type { ExtractErrError, ExtractOkValue, UnwrapErr } from './shared.js';
@@ -934,7 +934,6 @@ export const shapeAsync = <TRec extends Record<string, ResultAsync<any, any> | P
 		})
 	);
 };
-
 
 /**
  * Wraps a schema with a parse method in a `Result` that returns the parsed value on success or an error on failure.

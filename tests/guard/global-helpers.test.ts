@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, it, expect } from 'vitest';
-import { is } from '../../src/guard/index.js';
-import { makeGuard, type Guard } from '../../src/guard/shared.js';
+import { is, makeGuard } from '../../src/guard/index.js';
 
 // We use is.string / is.number as base guards for testing universals.
 // A simple custom guard for composition tests:

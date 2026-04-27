@@ -1,11 +1,38 @@
-import { makeGuard, type Guard, type InferGuard, arrayHelpers } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { arrayHelpers } from '../base/array-helpers.js';
+import type { DeepReadonly } from '../../utils.js';
 
 type Mutable<T extends readonly any[]> = [...T];
+type GuardArrayToTuple<G extends readonly Guard<any, any, any>[]> = {
+	[K in keyof G]: InferGuard<G[K]>;
+};
 
-export type TupleGuard<G extends readonly any[]> = Guard<
-	Mutable<{ [K in keyof G]: InferGuard<G[K]> }>,
-	TupleHelpers<Mutable<{ [K in keyof G]: InferGuard<G[K]> }>>
->;
+// generic now has regular tuple instead of a tuple of guards
+// for instance instead of TupleGuard<[StringGuard, NumberGuard]> it is TupleGuard<[string, number]>
+export interface TupleGuard<
+	Tuple extends readonly any[],
+	Modifier extends 'readonly' | 'mutable' = 'mutable',
+	Rest = undefined,
+> extends Guard<
+	Rest extends undefined
+		? Modifier extends 'readonly'
+			? DeepReadonly<{ [K in keyof Tuple]: Tuple[K] }>
+			: Mutable<{ [K in keyof Tuple]: Tuple[K] }>
+		: Modifier extends 'readonly'
+			? DeepReadonly<[...{ [K in keyof Tuple]: Tuple[K] }, ...Rest[]]>
+			: Mutable<[...{ [K in keyof Tuple]: Tuple[K] }, ...Rest[]]>,
+	TupleHelpers<
+		Rest extends undefined
+			? Modifier extends 'readonly'
+				? DeepReadonly<{ [K in keyof Tuple]: Tuple[K] }>
+				: Mutable<{ [K in keyof Tuple]: Tuple[K] }>
+			: Modifier extends 'readonly'
+				? DeepReadonly<[...{ [K in keyof Tuple]: Tuple[K] }, ...Rest[]]>
+				: Mutable<[...{ [K in keyof Tuple]: Tuple[K] }, ...Rest[]]>
+	>,
+	TupleGuard<Tuple, Modifier, Rest>
+> {}
 
 export interface TupleGuardFactory {
 	/**
@@ -20,7 +47,7 @@ export interface TupleGuardFactory {
 	 * }
 	 * ```
 	 */
-	<G extends readonly Guard<any, Record<string, any>>[]>(guards: [...G]): TupleGuard<G>;
+	<G extends readonly Guard<any, any, any>[]>(guards: [...G]): TupleGuard<GuardArrayToTuple<G>>;
 
 	/**
 	 * Creates a variadic tuple guard.
@@ -35,40 +62,38 @@ export interface TupleGuardFactory {
 	 * }
 	 * ```
 	 */
-	<G extends readonly Guard<any, Record<string, any>>[], R extends Guard<any, Record<string, any>>>(
+	<G extends readonly Guard<any, any, any>[], R extends Guard<any, any, any>>(
 		guards: [...G],
 		rest: R
-	): Guard<
-		[...{ [K in keyof G]: InferGuard<G[K]> }, ...InferGuard<R>[]],
-		TupleHelpers<[...{ [K in keyof G]: InferGuard<G[K]> }, ...InferGuard<R>[]]>
-	>;
+	): TupleGuard<GuardArrayToTuple<[...G, ...R[]]>, 'mutable', InferGuard<R>>;
 }
 
-export interface TupleHelpers<T extends readonly any[]> {
+export interface TupleHelpers<
+	T extends readonly any[],
+	Modifier extends 'readonly' | 'mutable' = 'mutable',
+	Rest = undefined,
+> {
 	/** Validates that the tuple is non-empty. */
-	nonEmpty: Guard<T, TupleHelpers<T>>;
+	nonEmpty: TupleGuard<T, Modifier, Rest>;
 	/** Validates that all elements in the tuple are unique (deep equality). */
-	unique: Guard<T, TupleHelpers<T>>;
+	unique: TupleGuard<T, Modifier, Rest>;
 	/** Validates that the tuple length is at least `n`. */
-	min: (n: number) => Guard<T, TupleHelpers<T>>;
+	min: (n: number) => TupleGuard<T, Modifier, Rest>;
 	/** Validates that the tuple length is at most `n`. */
-	max: (n: number) => Guard<T, TupleHelpers<T>>;
+	max: (n: number) => TupleGuard<T, Modifier, Rest>;
 	/** Validates that the tuple length is exactly `n`. */
-	size: (n: number) => Guard<T, TupleHelpers<T>>;
+	size: (n: number) => TupleGuard<T, Modifier, Rest>;
 	/** Validates that the tuple contains a specific value. */
-	includes: (item: T[number]) => Guard<T, TupleHelpers<T>>;
+	includes: (item: T[number]) => TupleGuard<T, Modifier, Rest>;
 	/** Validates that the tuple does not contain a specific value. */
-	excludes: (item: T[number]) => Guard<T, TupleHelpers<T>>;
+	excludes: (item: T[number]) => TupleGuard<T, Modifier, Rest>;
 	/** Wraps the tuple in `Object.freeze()` during validation. Since tuples are already readonly, this is not strictly necessary but is included for consistency with other collection guards. */
-	readonly: Guard<Readonly<T>, TupleHelpers<T>>;
+	readonly: TupleGuard<T, 'readonly', Rest>;
 }
 
 export const tupleHelpers: TupleHelpers<any> = arrayHelpers as any;
 
-export const TupleGuardFactory: TupleGuardFactory = (
-	guards: readonly Guard<any, Record<string, any>>[],
-	rest?: Guard<any, Record<string, any>>
-) => {
+export const TupleGuardFactory: TupleGuardFactory = (guards: readonly Guard<any, any, any>[], rest?: Guard<any, any, any>) => {
 	const fn = (value: unknown): value is any => {
 		if (!Array.isArray(value)) return false;
 		if (rest) {

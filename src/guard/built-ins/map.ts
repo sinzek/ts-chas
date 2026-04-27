@@ -1,26 +1,28 @@
-import { makeGuard, factory, transformer, property, type Guard, type InferGuard, JSON_SCHEMA } from '../shared.js';
+import { type Guard, type InferGuard, JSON_SCHEMA } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { factory, transformer, property } from '../base/helper-markers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-export interface MapHelpers<K, V, T extends Map<K, V> = Map<K, V>> {
+export interface MapHelpers<K, V, Modifier extends 'readonly' | 'mutable' = 'mutable'> {
 	/** Validates that the map is non-empty. */
-	nonEmpty: Guard<T, MapHelpers<K, V, T>>;
+	nonEmpty: MapGuard<K, V, Modifier>;
 	/** Validates that the map is empty. */
-	empty: Guard<T, MapHelpers<K, V, T>>;
+	empty: MapGuard<K, V, Modifier>;
 	/** Validates that the map has exactly `n` entries. */
-	size: (n: number) => Guard<T, MapHelpers<K, V, T>>;
+	size: (n: number) => MapGuard<K, V, Modifier>;
 	/** Validates that the map has at least `n` entries. */
-	minSize: (n: number) => Guard<T, MapHelpers<K, V, T>>;
+	minSize: (n: number) => MapGuard<K, V, Modifier>;
 	/** Validates that the map has at most `n` entries. */
-	maxSize: (n: number) => Guard<T, MapHelpers<K, V, T>>;
+	maxSize: (n: number) => MapGuard<K, V, Modifier>;
 	/** Validates that the map contains a specific key. */
-	hasKey: (key: K) => Guard<T, MapHelpers<K, V, T>>;
+	hasKey: (key: K) => MapGuard<K, V, Modifier>;
 	/** Validates that the map contains a specific value. */
-	hasValue: (value: V) => Guard<T, MapHelpers<K, V, T>>;
+	hasValue: (value: V) => MapGuard<K, V, Modifier>;
 	/** Validates that the map is readonly. */
-	readonly: Guard<Readonly<T>, MapHelpers<K, V, Readonly<T>>>;
+	readonly: MapGuard<K, V, 'readonly'>;
 }
 
 const mapHelpers: MapHelpers<any, any> = {
@@ -51,22 +53,23 @@ const mapHelpers: MapHelpers<any, any> = {
 // Factory
 // ---------------------------------------------------------------------------
 
-export type MapGuard<K, V> = Guard<Map<K, V>, MapHelpers<K, V>>;
+export interface MapGuard<K, V, Modifier extends 'readonly' | 'mutable' = 'mutable'> extends Guard<
+	Modifier extends 'readonly' ? Readonly<Map<K, V>> : Map<K, V>,
+	MapHelpers<K, V, Modifier>,
+	MapGuard<K, V, Modifier>
+> {}
 
 export interface MapGuardFactory {
 	/** Creates an unnarrowed Map guard (any key/value types). */
 	(): MapGuard<unknown, unknown>;
 	/** Creates a Map guard with typed keys and values. */
-	<KG extends Guard<any>, VG extends Guard<any>>(
+	<KG extends Guard<any, any, any>, VG extends Guard<any, any, any>>(
 		keyGuard: KG,
 		valueGuard: VG
 	): MapGuard<InferGuard<KG>, InferGuard<VG>>;
 }
 
-export const MapGuardFactory: MapGuardFactory = (
-	keyGuard?: Guard<any, Record<string, any>>,
-	valueGuard?: Guard<any, Record<string, any>>
-) =>
+export const MapGuardFactory: MapGuardFactory = (keyGuard?: Guard<any, any, any>, valueGuard?: Guard<any, any, any>) =>
 	makeGuard(
 		(v: unknown): v is Map<any, any> => {
 			if (!(v instanceof Map)) return false;

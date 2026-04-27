@@ -1,59 +1,59 @@
-import { makeGuard, type Guard, factory, transformer, JSON_SCHEMA } from '../shared.js';
+import { type Guard, JSON_SCHEMA } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { factory, transformer } from '../base/helper-markers.js';
 
 export interface DateHelpers {
 	/** Validates that the date is before the specified date. */
-	before: (date: Date) => Guard<Date, DateHelpers>;
+	before: (date: Date) => DateGuard;
 	/** Validates that the date is after the specified date. */
-	after: (date: Date) => Guard<Date, DateHelpers>;
+	after: (date: Date) => DateGuard;
 	/** Validates that the date is between the specified dates (inclusive). */
-	between: (min: Date, max: Date) => Guard<Date, DateHelpers>;
+	between: (min: Date, max: Date) => DateGuard;
 	/** Validates that the date is a weekend (Saturday or Sunday). */
-	weekend: Guard<Date, DateHelpers>;
+	weekend: DateGuard;
 	/** Validates that the date is a weekday (Monday through Friday). */
-	weekday: Guard<Date, DateHelpers>;
+	weekday: DateGuard;
 	/** Validates that the date is a specific day of the week. */
-	day: (
-		day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
-	) => Guard<Date, DateHelpers>;
+	day: (day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday') => DateGuard;
 	/** Validates that the date is a specific year. */
-	year: (year: number) => Guard<Date, DateHelpers>;
+	year: (year: number) => DateGuard;
 	/** Validates that the date is a specific month (0-indexed: January is 0, December is 11). */
-	month: (month: number) => Guard<Date, DateHelpers>;
+	month: (month: number) => DateGuard;
 	/** Validates that the date is a specific day of the month (1-31). */
-	dayOfMonth: (day: number) => Guard<Date, DateHelpers>;
+	dayOfMonth: (day: number) => DateGuard;
 	/** Validates that the date has a specific timezone offset (in minutes). */
-	timezoneOffset: (offset: number) => Guard<Date, DateHelpers>;
+	timezoneOffset: (offset: number) => DateGuard;
 	/** Validates that the date is a specific hour (0-23). */
-	hour: (hour: number) => Guard<Date, DateHelpers>;
+	hour: (hour: number) => DateGuard;
 	/** Validates that the date is a specific minute (0-59). */
-	minute: (minute: number) => Guard<Date, DateHelpers>;
+	minute: (minute: number) => DateGuard;
 	/** Validates that the date is a specific second (0-59). */
-	second: (second: number) => Guard<Date, DateHelpers>;
+	second: (second: number) => DateGuard;
 	/** Validates that the date is a specific millisecond (0-999). */
-	millisecond: (ms: number) => Guard<Date, DateHelpers>;
+	millisecond: (ms: number) => DateGuard;
 	/** Validates that the date is in the future. */
-	future: Guard<Date, DateHelpers>;
+	future: DateGuard;
 	/** Validates that the date is in the past. */
-	past: Guard<Date, DateHelpers>;
+	past: DateGuard;
 	/** Validates that the date is today (same calendar day). */
-	today: Guard<Date, DateHelpers>;
+	today: DateGuard;
 	/** Validates that the date is tomorrow (same calendar day). */
-	tomorrow: Guard<Date, DateHelpers>;
+	tomorrow: DateGuard;
 	/** Validates that the date is yesterday (same calendar day). */
-	yesterday: Guard<Date, DateHelpers>;
+	yesterday: DateGuard;
 	/** Validates that the date is on the same calendar day as the provided date. */
-	sameDayAs: (date: Date) => Guard<Date, DateHelpers>;
+	sameDayAs: (date: Date) => DateGuard;
 	/** Validates that the date is in the same month as the provided date. */
-	sameMonthAs: (date: Date) => Guard<Date, DateHelpers>;
+	sameMonthAs: (date: Date) => DateGuard;
 	/** Validates that the date is in the same year as the provided date. */
-	sameYearAs: (date: Date) => Guard<Date, DateHelpers>;
+	sameYearAs: (date: Date) => DateGuard;
 	/** Adjusts the date to the start of the specified unit before further validation. */
-	startOf: (unit: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second') => Guard<Date, DateHelpers>;
+	startOf: (unit: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second') => DateGuard;
 	/** Adjusts the date to the end of the specified unit before further validation. */
-	endOf: (unit: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second') => Guard<Date, DateHelpers>;
+	endOf: (unit: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second') => DateGuard;
 }
 
-export interface DateGuard extends Guard<Date, DateHelpers> {}
+export interface DateGuard extends Guard<Date, DateHelpers, DateGuard> {}
 
 const DAY_MAP = {
 	sunday: 0,
@@ -196,23 +196,35 @@ const GEN_NOW_MARGIN_MS = 60_000; // 1 minute
 	return { minimum: new Date(y, m, 1).getTime(), maximum: new Date(y, m + 1, 0, 23, 59, 59, 999).getTime() };
 };
 (dateHelpers.sameDayAs as any)[JSON_SCHEMA] = (date: Date) => {
-	const start = new Date(date); start.setHours(0, 0, 0, 0);
-	const end = new Date(date); end.setHours(23, 59, 59, 999);
+	const start = new Date(date);
+	start.setHours(0, 0, 0, 0);
+	const end = new Date(date);
+	end.setHours(23, 59, 59, 999);
 	return { minimum: start.getTime(), maximum: end.getTime() };
 };
 (dateHelpers.today as any)[JSON_SCHEMA] = () => {
-	const start = new Date(); start.setHours(0, 0, 0, 0);
-	const end = new Date(); end.setHours(23, 59, 59, 999);
+	const start = new Date();
+	start.setHours(0, 0, 0, 0);
+	const end = new Date();
+	end.setHours(23, 59, 59, 999);
 	return { minimum: start.getTime(), maximum: end.getTime() };
 };
 (dateHelpers.tomorrow as any)[JSON_SCHEMA] = () => {
-	const start = new Date(); start.setDate(start.getDate() + 1); start.setHours(0, 0, 0, 0);
-	const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23, 59, 59, 999);
+	const start = new Date();
+	start.setDate(start.getDate() + 1);
+	start.setHours(0, 0, 0, 0);
+	const end = new Date();
+	end.setDate(end.getDate() + 1);
+	end.setHours(23, 59, 59, 999);
 	return { minimum: start.getTime(), maximum: end.getTime() };
 };
 (dateHelpers.yesterday as any)[JSON_SCHEMA] = () => {
-	const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0);
-	const end = new Date(); end.setDate(end.getDate() - 1); end.setHours(23, 59, 59, 999);
+	const start = new Date();
+	start.setDate(start.getDate() - 1);
+	start.setHours(0, 0, 0, 0);
+	const end = new Date();
+	end.setDate(end.getDate() - 1);
+	end.setHours(23, 59, 59, 999);
 	return { minimum: start.getTime(), maximum: end.getTime() };
 };
 

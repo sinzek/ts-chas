@@ -85,4 +85,29 @@ describe('is.instanceof', () => {
 		expect(typeErrorGuard(new Error('something bad happened'))).toBe(false); // not a TypeError
 		expect(typeErrorGuard(new TypeError('it is okay'))).toBe(false); // message mismatch
 	});
+
+	it('realmSafe correctly identifies cross-realm objects', () => {
+		const guard = is.instanceof(Error).realmSafe;
+
+		// 1. Same-realm works
+		expect(guard(new Error('normal'))).toBe(true);
+		expect(guard(new TypeError('type err'))).toBe(true); // TypeError inherits from Error
+
+		// 2. Simulate a cross-realm object (fails basic instanceof)
+		// We'll create a fake object that looks like a cross-realm Error
+		const crossRealmError = Object.create(null);
+		Object.defineProperty(crossRealmError, Symbol.toStringTag, { value: 'Error' });
+		
+		expect(is.instanceof(Error)(crossRealmError)).toBe(false); // basic fails
+		expect(guard(crossRealmError)).toBe(true); // realmSafe allows via toStringTag
+
+		const crossRealmError2 = Object.create(null);
+		crossRealmError2.constructor = { name: 'Error' };
+		
+		expect(is.instanceof(Error)(crossRealmError2)).toBe(false); // basic fails
+		expect(guard(crossRealmError2)).toBe(true); // realmSafe allows via constructor name
+		
+		// 3. Fails on completely unrelated objects
+		expect(guard({ name: 'Error' })).toBe(false);
+	});
 });

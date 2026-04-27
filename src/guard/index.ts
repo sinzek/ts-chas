@@ -5,13 +5,13 @@ import { InstanceofGuardFactory } from './objects/instanceof.js';
 import { BigIntGuard } from './primitives/bigint.js';
 import { BooleanGuard } from './primitives/boolean.js';
 import { NullableGuardFactory, NullGuard } from './primitives/null.js';
-import { NaNGuard, NumberGuard } from './primitives/number.js';
+import { InfiniteGuard, NaNGuard, NumberGuard } from './primitives/number.js';
 import { StringGuard } from './primitives/string.js';
 import { SymbolGuard } from './primitives/symbol.js';
 import { OptionalGuardFactory, UndefinedGuard, VoidGuard } from './primitives/undefined.js';
 import { ObjectGuardFactory, type ObjectGuard } from './objects/object.js';
 import { RecordGuardFactory } from './objects/record.js';
-import { AnyGuard, NeverGuard, UnknownGuard } from './type-only.js';
+import { AnyGuard, NeverGuard, UnknownGuard } from './misc/type-only.js';
 import { DateGuard } from './built-ins/date.js';
 import { RegExpGuardFactory, type RegExpGuard } from './built-ins/regexp.js';
 import { UrlGuardFactory, type UrlGuard } from './built-ins/url.js';
@@ -40,6 +40,7 @@ import { JsonGuard } from './misc/json.js';
 import { CustomGuardFactory } from './custom/custom.js';
 import { FunctionGuardFactory } from './primitives/function.js';
 import { NullishGuardFactory } from './primitives/nullish.js';
+import { StandardGuardFactory } from './custom/standard.js';
 import type { DeepWritable } from '../utils.js';
 
 // schema utilities
@@ -59,11 +60,11 @@ export type {
 	IsBranded,
 	HasBrand,
 	GetBrand,
-} from './shared.js';
+} from './base/shared.js';
 
 // guard types, factories, helpers
-export type { ObjectHelpers } from './objects/shared.js';
-export type { ArrayHelpers } from './shared.js';
+export type { ObjectHelpers } from './objects/object-helpers.js';
+export type { ArrayHelpers } from './base/array-helpers.js';
 export type { ObjectGuardFactory, ObjectGuard } from './objects/object.js';
 export type { ArrayGuardFactory, ArrayGuard } from './objects/array.js';
 export type { EnumHelpers, EnumGuard, EnumGuardFactory } from './misc/enum.js';
@@ -72,8 +73,8 @@ export type { MapHelpers, MapGuard, MapGuardFactory } from './built-ins/map.js';
 export type { RegExpHelpers, RegExpGuard, RegExpGuardFactory } from './built-ins/regexp.js';
 export type { UrlHelpers, UrlGuard, UrlGuardFactory } from './built-ins/url.js';
 export type { JsonHelpers, JsonGuard } from './misc/json.js';
-export type { ResultHelpers, ResultGuard, ResultGuardFactory } from './custom/result.js';
-export type { OptionHelpers, OptionGuard, OptionGuardFactory } from './custom/option.js';
+export type { ResultHelpers, ResultGuard, ResultGuardFactory, OkGuard, ErrGuard } from './custom/result.js';
+export type { OptionHelpers, OptionGuard, OptionGuardFactory, SomeGuard, NoneGuard } from './custom/option.js';
 export type { FunctionHelpers, FunctionGuard, FunctionGuardFactory } from './primitives/function.js';
 export type { TaggedErrGuardFactory, TaggedErrGuard } from './custom/tagged-err.js';
 export type { TemplateLiteralGuardFactory, TemplateLiteralGuard } from './misc/template-literal.js';
@@ -104,7 +105,7 @@ export type { SymbolGuard, SymbolHelpers } from './primitives/symbol.js';
 export type { UndefinedGuard, VoidGuard, OptionalGuard, OptionalGuardFactory } from './primitives/undefined.js';
 export type { NullGuard, NullableGuard, NullableGuardFactory } from './primitives/null.js';
 export type { NullishGuard, NullishGuardFactory } from './primitives/nullish.js';
-export type { AnyGuard, UnknownGuard, NeverGuard } from './type-only.js';
+export type { AnyGuard, UnknownGuard, NeverGuard } from './misc/type-only.js';
 export type { FileGuard, FileHelpers } from './built-ins/file.js';
 export type { ErrorGuard, ErrorHelpers } from './built-ins/error.js';
 export type { PromiseGuard } from './built-ins/promise.js';
@@ -116,21 +117,16 @@ export type { IterableGuard, AsyncIterableGuard } from './built-ins/iterable.js'
 export type { GeneratorGuard, AsyncGeneratorGuard } from './built-ins/generator.js';
 
 // guard authoring utilities for custom guard creation
-export {
-	makeGuard,
-	factory,
-	transformer,
-	terminal,
-	property,
-	JSON_SCHEMA,
-	type TransformerResult,
-	type JsonSchemaNode,
-	type Arbitrary,
-} from './shared.js';
+export { JSON_SCHEMA, type JsonSchemaNode, type Arbitrary } from './base/shared.js';
+export { makeGuard } from './base/proxy.js';
+export { factory, transformer, terminal, property, type TransformerResult } from './base/helper-markers.js';
 
 // misc types
 export type { Json } from './misc/json.js';
 export { AsyncGuard } from './async.js';
+
+// configuration
+export { setDefaultUnknownKeyPolicy, type UnknownKeyPolicy } from './config.js';
 
 const baseIs = {
 	// ---- PRIMITIVES ----
@@ -170,6 +166,17 @@ const baseIs = {
 	 * is.nan(123); // false
 	 */
 	nan: NaNGuard,
+	/**
+	 * Creates a Guard that validates that a value is an infinite number.
+	 *
+	 * @example
+	 * is.infinite(Infinity); // true
+	 * is.infinite.negative(-Infinity); // true
+	 * is.infinite.positive(Infinity); // true
+	 * is.infinite(123); // false
+	 * is.infinite(NaN); // false
+	 */
+	infinite: InfiniteGuard,
 	/**
 	 * Creates a Guard that validates that a value is a boolean.
 	 *
@@ -618,6 +625,17 @@ const baseIs = {
 	 */
 	xor: XorGuardFactory,
 	/**
+	 * Creates a Guard from a Zod schema or another compatible standard library.
+	 *
+	 * @example
+	 * ```ts
+	 * const User = is.object({
+	 *   name: is.standard(z.string().email()),
+	 * });
+	 * ```
+	 */
+	standard: StandardGuardFactory,
+	/**
 	 * Creates a Guard that validates that a string matches a template literal pattern.
 	 * Accepts a mix of string segments and guards for interpolated positions.
 	 * Any guard whose inferred type extends `string | number | bigint | boolean | null | undefined`
@@ -979,10 +997,8 @@ type GuardFromKnownType<T> = T extends string
 																			? MapGuard<K, V>
 																			: T extends Set<infer V>
 																				? SetGuard<V>
-																				: T extends readonly (infer I)[]
-																					? ArrayGuard<
-																							[GuardFromKnownType<I>]
-																						>
+																				: T extends any[]
+																					? ArrayGuard<T[number]>
 																					: T extends Record<string, any>
 																						? ObjectGuard<{
 																								-readonly [K in keyof T]: T[K];
@@ -1000,7 +1016,7 @@ type GuardFromLiteral<T> = T extends string | number | boolean | bigint
 				: T extends Set<infer V>
 					? SetGuard<V>
 					: T extends readonly [infer _H, ...infer _R] | readonly []
-						? TupleGuard<{ [K in keyof T]: GuardFromLiteral<T[K] & {}> }>
+						? TupleGuard<{ [K in keyof T]: T[K] }>
 						: T extends readonly (infer I)[]
 							? ArrayGuard<[GuardFromLiteral<I>]>
 							: T extends Record<string, any>

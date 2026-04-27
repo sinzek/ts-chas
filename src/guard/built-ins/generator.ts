@@ -1,5 +1,7 @@
-import { makeGuard, transformer, terminal, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 import { AsyncGuard } from '../async.js';
+import { terminal, transformer } from '../base/helper-markers.js';
 
 export interface GeneratorHelpers {
 	/**
@@ -8,13 +10,11 @@ export interface GeneratorHelpers {
 	 * **Warning**: Generators are stateful! This completely consumes the generator.
 	 * If the generator is infinite, this guard will hang indefinitely.
 	 */
-	of: <G extends Guard<any>>(
-		innerGuard: G
-	) => Guard<Generator<InferGuard<G>, unknown, unknown>, GeneratorHelpers>;
+	of: <G extends Guard<any, any, any>>(innerGuard: G) => GeneratorGuard<InferGuard<G>>;
 }
 
 const generatorHelpers: GeneratorHelpers = {
-	of: transformer((target: Guard<any>, innerGuard: Guard<any>) => ({
+	of: transformer((target: Guard<any, any, any>, innerGuard: Guard<any, any, any>) => ({
 		fn: (v: unknown): v is Generator<any, unknown, unknown> => {
 			if (!target(v)) return false;
 			for (const item of v as Generator<any, unknown, unknown>) {
@@ -26,7 +26,11 @@ const generatorHelpers: GeneratorHelpers = {
 	})) as any,
 };
 
-export interface GeneratorGuard extends Guard<Generator<unknown, unknown, unknown>, GeneratorHelpers> {}
+export interface GeneratorGuard<T = unknown> extends Guard<
+	Generator<T, unknown, unknown>,
+	GeneratorHelpers,
+	GeneratorGuard
+> {}
 
 export const GeneratorGuard: GeneratorGuard = makeGuard(
 	(v: unknown): v is Generator<unknown, unknown, unknown> =>
@@ -47,13 +51,11 @@ export interface AsyncGeneratorHelpers {
 	 * **Warning**: Generators are stateful! This completely consumes the generator.
 	 * If the generator is infinite, this guard will hang indefinitely.
 	 */
-	of: <G extends Guard<any>>(
-		innerGuard: G
-	) => AsyncGuard<AsyncGenerator<InferGuard<G>, unknown, unknown>>;
+	of: <G extends Guard<any, any, any>>(innerGuard: G) => AsyncGuard<AsyncGenerator<InferGuard<G>, unknown, unknown>>;
 }
 
 const asyncGeneratorHelpers: AsyncGeneratorHelpers = {
-	of: terminal((target: Guard<any>, innerGuard: Guard<any>) => {
+	of: terminal((target: Guard<any, any, any>, innerGuard: Guard<any, any, any>) => {
 		return new AsyncGuard(target, []).whereAsync(async (v: unknown) => {
 			for await (const item of v as AsyncGenerator<any, unknown, unknown>) {
 				if (!innerGuard(item)) return false;
@@ -63,7 +65,11 @@ const asyncGeneratorHelpers: AsyncGeneratorHelpers = {
 	}) as any,
 };
 
-export interface AsyncGeneratorGuard extends Guard<AsyncGenerator<unknown, unknown, unknown>, AsyncGeneratorHelpers> {}
+export interface AsyncGeneratorGuard<T = unknown> extends Guard<
+	AsyncGenerator<T, unknown, unknown>,
+	AsyncGeneratorHelpers,
+	AsyncGeneratorGuard
+> {}
 
 export const AsyncGeneratorGuard: AsyncGeneratorGuard = makeGuard(
 	(v: unknown): v is AsyncGenerator<unknown, unknown, unknown> =>

@@ -2,7 +2,9 @@ import { sha1, md5 } from '@noble/hashes/legacy.js';
 import { sha256, sha384, sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { getObjectDepth, isSafeObject } from '../../utils.js';
-import { factory, makeGuard, type Guard, transformer, property, JSON_SCHEMA } from '../shared.js';
+import { type Guard, JSON_SCHEMA } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { transformer, property, factory } from '../base/helper-markers.js';
 
 const ENC = {
 	hex: {
@@ -49,18 +51,25 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 	return out === 0;
 }
 
-export interface StringGuard extends Guard<string, StringHelpers> {}
+export interface StringGuard extends Guard<string, StringHelpers, StringGuard> {}
+export namespace StringGuard {
+	export interface Iso extends Guard<string, StringHelpers<'iso'> & IsoHelpers, StringGuard.Iso> {}
+	export interface Hash extends Guard<string, StringHelpers<'hash'> & HashHelpers, StringGuard.Hash> {}
+	export interface BoolStr extends Guard<string, StringHelpers<'boolStr'> & BoolStrHelpers, StringGuard.BoolStr> {}
+	export interface ParsedBoolStr extends Guard<boolean, {}, StringGuard.ParsedBoolStr> {}
+	export interface ParsedJson<T> extends Guard<T, {}, StringGuard.ParsedJson<T>> {}
+}
 
 export interface IsoHelpers {
 	/** Validates ISO 8601 date-only format: YYYY-MM-DD */
-	date: Guard<string, StringHelpers & IsoHelpers>;
+	date: StringGuard.Iso;
 	/**
 	 * Validates ISO 8601 time format.
 	 * By default seconds are optional and arbitrary sub-second precision is allowed.
 	 * @param options.precision -1 = minute only (HH:MM), 0 = seconds required (HH:MM:SS),
 	 *   1+ = exact sub-second digits (HH:MM:SS.s, HH:MM:SS.ss, etc.)
 	 */
-	time: (options?: { precision?: number }) => Guard<string, StringHelpers & IsoHelpers>;
+	time: (options?: { precision?: number }) => StringGuard.Iso;
 	/**
 	 * Validates full ISO 8601 datetime.
 	 * By default, requires a timezone offset (Z or ±HH:MM) and arbitrary sub-second precision.
@@ -69,26 +78,16 @@ export interface IsoHelpers {
 	 * @param options.precision -1 = minute only, 0 = seconds required,
 	 *   1+ = exact sub-second digits. Default: arbitrary.
 	 */
-	datetime: (options?: {
-		offset?: boolean;
-		local?: boolean;
-		precision?: number;
-	}) => Guard<string, StringHelpers & IsoHelpers>;
+	datetime: (options?: { offset?: boolean; local?: boolean; precision?: number }) => StringGuard.Iso;
 }
 
 export interface BoolStrParsed {
-	asBool: Guard<boolean, {}>;
+	asBool: StringGuard.ParsedBoolStr;
 }
 
 export interface BoolStrHelpers extends BoolStrParsed {
-	truthy: (options?: {
-		caseSensitive?: boolean;
-		values?: readonly string[];
-	}) => Guard<string, StringHelpers & BoolStrParsed>;
-	falsy: (options?: {
-		caseSensitive?: boolean;
-		values?: readonly string[];
-	}) => Guard<string, StringHelpers & BoolStrParsed>;
+	truthy: (options?: { caseSensitive?: boolean; values?: readonly string[] }) => StringGuard.BoolStr;
+	falsy: (options?: { caseSensitive?: boolean; values?: readonly string[] }) => StringGuard.BoolStr;
 }
 
 const boolStrVals = {
@@ -105,7 +104,7 @@ export interface HashHelpers {
 	 * Verifies that the hashed value matches the hash of the provided input.
 	 * @param input The plain text input to hash and compare.
 	 */
-	verify: (input: string) => Guard<string, StringHelpers & HashHelpers>;
+	verify: (input: string) => StringGuard.Hash;
 }
 
 type JWTSigningAlgorithm =
@@ -124,37 +123,45 @@ type JWTSigningAlgorithm =
 	| 'EdDSA'
 	| (string & {});
 
-export interface StringHelpers {
+type EvalStringGuardType<Variant extends 'base' | 'iso' | 'hash' | 'boolStr' = 'base'> = Variant extends 'iso'
+	? StringGuard.Iso
+	: Variant extends 'hash'
+		? StringGuard.Hash
+		: Variant extends 'boolStr'
+			? StringGuard.BoolStr
+			: StringGuard;
+
+export interface StringHelpers<Variant extends 'base' | 'iso' | 'hash' | 'boolStr' = 'base'> {
 	/** Validates an RFC 5322 compliant email address. To use your own regex pattern, use `.regex()` instead. */
-	email: Guard<string, StringHelpers>;
+	email: EvalStringGuardType<Variant>;
 	/** Validates any WHATWG-compliant URL. Isomorphic support via integrated parser. */
-	url: Guard<string, StringHelpers>;
+	url: EvalStringGuardType<Variant>;
 	/** Validates a URL with 'http:' or 'https:' protocols. */
-	httpUrl: Guard<string, StringHelpers>;
+	httpUrl: EvalStringGuardType<Variant>;
 	/** Validates a hostname format. Does not verify DNS records. */
-	hostname: Guard<string, StringHelpers>;
+	hostname: EvalStringGuardType<Variant>;
 	/** Validates that a string includes at least one emoji. */
-	emoji: Guard<string, StringHelpers>;
+	emoji: EvalStringGuardType<Variant>;
 	/** Validates that the entire string matches its uppercase form. */
-	uppercase: Guard<string, StringHelpers>;
+	uppercase: EvalStringGuardType<Variant>;
 	/** Validates that the entire string matches its lowercase form. */
-	lowercase: Guard<string, StringHelpers>;
+	lowercase: EvalStringGuardType<Variant>;
 	/** Validates a cuid (deprecated). */
-	cuid: Guard<string, StringHelpers>;
+	cuid: EvalStringGuardType<Variant>;
 	/** Validates a cuid2. */
-	cuid2: Guard<string, StringHelpers>;
+	cuid2: EvalStringGuardType<Variant>;
 	/** Validates a ULID (Universally Unique Lexicographically Sortable Identifier). */
-	ulid: Guard<string, StringHelpers>;
+	ulid: EvalStringGuardType<Variant>;
 	/** Validates an IPv4 address. */
-	ipv4: Guard<string, StringHelpers>;
+	ipv4: EvalStringGuardType<Variant>;
 	/** Validates an IPv6 address. */
-	ipv6: Guard<string, StringHelpers>;
+	ipv6: EvalStringGuardType<Variant>;
 	/** Validates an IPv4 address with CIDR mask (e.g. 192.168.1.0/24). */
-	cidrv4: Guard<string, StringHelpers>;
+	cidrv4: EvalStringGuardType<Variant>;
 	/** Validates an IPv6 address with CIDR mask (e.g. 2001:db8::/32). */
-	cidrv6: Guard<string, StringHelpers>;
+	cidrv6: EvalStringGuardType<Variant>;
 	/** Validates a GUID/UUID format (any version). For strict RFC variant checks, use .uuid(). */
-	guid: Guard<string, StringHelpers>;
+	guid: EvalStringGuardType<Variant>;
 
 	/**
 	 * Validates a boolean string. If `caseSensitive` is set to false, it will convert the string to lowercase before validating.
@@ -180,12 +187,12 @@ export interface StringHelpers {
 	 * - disabled, Disabled, DISABLED
 	 * - inactive, Inactive, INACTIVE
 	 */
-	boolStr: Guard<string, StringHelpers & BoolStrHelpers>;
+	boolStr: StringGuard.BoolStr;
 	/**
 	 * Validates a MAC address with an optional custom delimiter.
 	 * @param options.delimiter - The character separating byte pairs (':', '-', '.', or 'none'). Default: ':'.
 	 */
-	mac: (options?: { delimiter?: ':' | '-' | '.' | 'none' }) => Guard<string, StringHelpers>;
+	mac: (options?: { delimiter?: ':' | '-' | '.' | 'none' }) => EvalStringGuardType<Variant>;
 	/**
 	 * Validates a UUID with optional version check. Enforces RFC 9562/4122 variant bits
 	 * (Byte 8 must be 8, 9, a, or b).
@@ -193,32 +200,32 @@ export interface StringHelpers {
 	 */
 	uuid: (options?: {
 		version?: 'v1' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6' | 'v7' | 'v8';
-	}) => Guard<string, StringHelpers>;
+	}) => EvalStringGuardType<Variant>;
 	/** Convenience helper for v4 UUID validation. */
-	uuidv4: Guard<string, StringHelpers>;
+	uuidv4: EvalStringGuardType<Variant>;
 	/** Convenience helper for v6 UUID validation. */
-	uuidv6: Guard<string, StringHelpers>;
+	uuidv6: EvalStringGuardType<Variant>;
 	/** Convenience helper for v7 UUID validation. */
-	uuidv7: Guard<string, StringHelpers>;
+	uuidv7: EvalStringGuardType<Variant>;
 	/** Validates minimum string length (inclusive). */
-	min: (min: number) => Guard<string, StringHelpers>;
+	min: (min: number) => EvalStringGuardType<Variant>;
 	/** Validates maximum string length (inclusive). */
-	max: (max: number) => Guard<string, StringHelpers>;
+	max: (max: number) => EvalStringGuardType<Variant>;
 	/** Validates exact string length. */
-	length: (length: number) => Guard<string, StringHelpers>;
+	length: (length: number) => EvalStringGuardType<Variant>;
 	/** Validates string against a custom regular expression. */
-	regex: (regex: RegExp) => Guard<string, StringHelpers>;
+	regex: (regex: RegExp) => EvalStringGuardType<Variant>;
 	/** Validates that string includes a substring. */
-	includes: (sub: string) => Guard<string, StringHelpers>;
+	includes: (sub: string) => EvalStringGuardType<Variant>;
 	/** Validates that string starts with a prefix. */
-	startsWith: (pfx: string) => Guard<string, StringHelpers>;
+	startsWith: (pfx: string) => EvalStringGuardType<Variant>;
 	/** Validates that string ends with a suffix. */
-	endsWith: (sfx: string) => Guard<string, StringHelpers>;
+	endsWith: (sfx: string) => EvalStringGuardType<Variant>;
 	/**
 	 * Validates Base64 encoding. Use options for strict padding control. Isomorphic support.
 	 * @param options.padding - Whether padding is 'required', 'optional', or 'forbidden'. Default: 'optional'.
 	 */
-	base64: (options?: { padding?: 'required' | 'optional' | 'forbidden' }) => Guard<string, StringHelpers>;
+	base64: (options?: { padding?: 'required' | 'optional' | 'forbidden' }) => EvalStringGuardType<Variant>;
 	/**
 	 * Validates Hexadecimal encoding. Use options for prefix management (0x) and case control.
 	 * @param options.prefix - If true, requires '0x' or '0X' prefix. If false, forbids it. Default: optional.
@@ -229,12 +236,12 @@ export interface StringHelpers {
 		prefix?: boolean;
 		evenLength?: boolean;
 		case?: 'lower' | 'upper' | 'mixed';
-	}) => Guard<string, StringHelpers>;
+	}) => EvalStringGuardType<Variant>;
 	/**
 	 * Validates a NanoID with an optional exact length.
 	 * @param options.length - The exact number of characters expected. Default: 21.
 	 */
-	nanoid: (options?: { length?: number }) => Guard<string, StringHelpers>;
+	nanoid: (options?: { length?: number }) => EvalStringGuardType<Variant>;
 	/**
 	 * Validates cryptographic hash formats and provides verification helpers.
 	 * Utilizes `@noble/hashes` for cross-platform, isomorphic (browser/node/edge) support.
@@ -248,7 +255,7 @@ export interface StringHelpers {
 		alg?: 'sha1' | 'sha256' | 'sha384' | 'sha512' | 'md5';
 		enc?: 'hex' | 'base64' | 'base64url';
 		padding?: 'required' | 'optional' | 'forbidden';
-	}) => Guard<string, StringHelpers & HashHelpers>;
+	}) => StringGuard.Hash;
 	/**
 	 * Validates JSON Web Token (JWT) structure. Isomorphic support (client/server safe).
 	 * Optionally validates JSON structure of header/payload and enforces signing algorithms.
@@ -259,22 +266,22 @@ export interface StringHelpers {
 	jwt: (options?: {
 		validateJson?: boolean;
 		alg?: JWTSigningAlgorithm | JWTSigningAlgorithm[];
-	}) => Guard<string, StringHelpers>;
+	}) => EvalStringGuardType<Variant>;
 
 	/** Trims whitespace from both ends of the string before validation. Transforms value. */
-	trim: () => Guard<string, StringHelpers>;
+	trim: () => EvalStringGuardType<Variant>;
 	/** Transforms the string to lowercase before validation. Transforms value. */
-	toLowerCase: () => Guard<string, StringHelpers>;
+	toLowerCase: () => EvalStringGuardType<Variant>;
 	/** Transforms the string to uppercase before validation. Transforms value. */
-	toUpperCase: () => Guard<string, StringHelpers>;
+	toUpperCase: () => EvalStringGuardType<Variant>;
 	/**
 	 * Transforms the string using the provided Unicode normalization form (NFC, NFD, etc).
 	 * @param options.form - The normalization form to use ('NFC', 'NFD', 'NFKC', or 'NFKD'). Default: 'NFC'.
 	 */
-	normalize: (options?: { form?: 'NFC' | 'NFD' | 'NFKC' | 'NFKD' }) => Guard<string, StringHelpers>;
+	normalize: (options?: { form?: 'NFC' | 'NFD' | 'NFKC' | 'NFKD' }) => EvalStringGuardType<Variant>;
 
 	/** Validates full ISO 8601 formatting. Use sub-properties for specific date/time formats. */
-	iso: Guard<string, StringHelpers & IsoHelpers>;
+	iso: StringGuard.Iso;
 
 	/**
 	 * Transforms the string into a parsed JSON value. Chained helpers after
@@ -290,7 +297,7 @@ export interface StringHelpers {
 		type?: 'object' | 'array';
 		maxDepth?: number;
 		safe?: boolean;
-	}) => Guard<TParsed, {}>;
+	}) => StringGuard.ParsedJson<TParsed>;
 
 	/**
 	 * Validates that string is parsable as JSON. Optionally enforces a schema or type
@@ -308,7 +315,7 @@ export interface StringHelpers {
 		maxLength?: number;
 		maxDepth?: number;
 		safe?: boolean;
-	}) => Guard<string, StringHelpers>;
+	}) => EvalStringGuardType<Variant>;
 }
 
 const RGX = {
@@ -344,7 +351,7 @@ function isValidEmail(v: unknown): boolean {
 	return true;
 }
 
-const stringHelpers: StringHelpers = {
+export const stringHelpers: StringHelpers = {
 	email: ((v: string) => isValidEmail(v)) as any,
 	url: ((v: string) => {
 		try {
@@ -366,7 +373,9 @@ const stringHelpers: StringHelpers = {
 		if (typeof v !== 'string' || v.length === 0 || v.length > 253) return false;
 		// RFC 952/1123: labels are alphanumeric + hyphens, separated by dots.
 		// Labels must not start or end with a hyphen.
-		return /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(v);
+		return /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(
+			v
+		);
 	}) as any,
 	emoji: ((v: string) => RGX.emoji.test(v)) as any,
 	uppercase: ((v: string) => v === v.toUpperCase()) as any,
@@ -386,7 +395,7 @@ const stringHelpers: StringHelpers = {
 	}) as any,
 	ipv6: ((v: string) => {
 		try {
-			return new URL(`http://[${v}]`).hostname === `[${v}]`;
+			return new URL(`http://[${v}]`).hostname.startsWith('[');
 		} catch {
 			return false;
 		}
@@ -412,7 +421,7 @@ const stringHelpers: StringHelpers = {
 		if (!ip || !mask) return false;
 
 		try {
-			if (new URL(`http://[${ip}]`).hostname !== `[${ip}]`) return false;
+			if (!new URL(`http://[${ip}]`).hostname.startsWith('[')) return false;
 		} catch {
 			return false;
 		}
@@ -921,7 +930,11 @@ const stringHelpers: StringHelpers = {
 					const s = val.toLowerCase();
 					return boolStrVals.truthy.has(s) || boolStrVals.falsy.has(s);
 				},
-				meta: { name: `${target.meta.name}.boolStr`, id: 'string', jsonSchema: { ...target.meta.jsonSchema, _format: 'boolStr' } },
+				meta: {
+					name: `${target.meta.name}.boolStr`,
+					id: 'string',
+					jsonSchema: { ...target.meta.jsonSchema, _format: 'boolStr' },
+				},
 				helpers: { truthy: truthy as any, falsy: falsy as any, asBool: asBool as any } as any,
 			};
 		})

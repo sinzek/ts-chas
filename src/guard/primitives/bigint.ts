@@ -1,39 +1,41 @@
-import { makeGuard, type Guard, factory, JSON_SCHEMA } from '../shared.js';
+import { type Guard, JSON_SCHEMA } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
+import { factory } from '../base/helper-markers.js';
 
 export interface BigIntHelpers {
 	/** Validates that the bigint is greater than the minimum. */
-	gt: (min: bigint) => Guard<bigint, BigIntHelpers>;
+	gt: (min: bigint) => BigIntGuard;
 	/** Validates that the bigint is greater than or equal to the minimum. */
-	gte: (min: bigint) => Guard<bigint, BigIntHelpers>;
+	gte: (min: bigint) => BigIntGuard;
 	/** Validates that the bigint is less than the maximum. */
-	lt: (max: bigint) => Guard<bigint, BigIntHelpers>;
+	lt: (max: bigint) => BigIntGuard;
 	/** Validates that the bigint is less than or equal to the maximum. */
-	lte: (max: bigint) => Guard<bigint, BigIntHelpers>;
+	lte: (max: bigint) => BigIntGuard;
 	/** Validates that the bigint is positive (> 0). */
-	positive: Guard<bigint, BigIntHelpers>;
+	positive: BigIntGuard;
 	/** Validates that the bigint is non-negative (>= 0). */
-	nonnegative: Guard<bigint, BigIntHelpers>;
+	nonnegative: BigIntGuard;
 	/** Validates that the bigint is negative (< 0). */
-	negative: Guard<bigint, BigIntHelpers>;
+	negative: BigIntGuard;
 	/** Validates that the bigint is non-positive (<= 0). */
-	nonpositive: Guard<bigint, BigIntHelpers>;
+	nonpositive: BigIntGuard;
 	/** Validates that the bigint is between the minimum and maximum (inclusive). */
-	between: (min: bigint, max: bigint) => Guard<bigint, BigIntHelpers>;
+	between: (min: bigint, max: bigint) => BigIntGuard;
 	/** Validates that the bigint is even. */
-	even: Guard<bigint, BigIntHelpers>;
+	even: BigIntGuard;
 	/** Validates that the bigint is odd. */
-	odd: Guard<bigint, BigIntHelpers>;
+	odd: BigIntGuard;
 	/** Validates that the bigint is a multiple of the given bigint. */
-	multipleOf: (n: bigint) => Guard<bigint, BigIntHelpers>;
+	multipleOf: (n: bigint) => BigIntGuard;
 	/** Validates that the bigint has a specific number of digits. */
-	digits: (n: number) => Guard<bigint, BigIntHelpers>;
+	digits: (n: number) => BigIntGuard;
 	/** Validates that the bigint is a 32-bit signed integer. */
-	int32: Guard<bigint, BigIntHelpers>;
+	int32: BigIntGuard;
 	/** Validates that the bigint is a 64-bit signed integer. */
-	int64: Guard<bigint, BigIntHelpers>;
+	int64: BigIntGuard;
 }
 
-export interface BigIntGuard extends Guard<bigint, BigIntHelpers> {}
+export interface BigIntGuard extends Guard<bigint, BigIntHelpers, BigIntGuard> {}
 
 const bigintHelpers: BigIntHelpers = {
 	gte: factory((min: bigint) => (v: bigint) => v >= min),
@@ -72,10 +74,16 @@ export const BigIntGuard: BigIntGuard = makeGuard(
 (bigintHelpers.nonnegative as any)[JSON_SCHEMA] = () => ({ _bigintMin: '0' });
 (bigintHelpers.negative as any)[JSON_SCHEMA] = () => ({ _bigintExclusiveMax: '0' });
 (bigintHelpers.nonpositive as any)[JSON_SCHEMA] = () => ({ _bigintMax: '0' });
-(bigintHelpers.between as any)[JSON_SCHEMA] = (min: bigint, max: bigint) => ({ _bigintMin: String(min), _bigintMax: String(max) });
+(bigintHelpers.between as any)[JSON_SCHEMA] = (min: bigint, max: bigint) => ({
+	_bigintMin: String(min),
+	_bigintMax: String(max),
+});
 (bigintHelpers.even as any)[JSON_SCHEMA] = () => ({ _bigintEven: true });
 (bigintHelpers.odd as any)[JSON_SCHEMA] = () => ({ _bigintOdd: true });
 (bigintHelpers.multipleOf as any)[JSON_SCHEMA] = (n: bigint) => ({ _bigintMultipleOf: String(n) });
 (bigintHelpers.digits as any)[JSON_SCHEMA] = (n: number) => ({ _bigintDigits: n });
 (bigintHelpers.int32 as any)[JSON_SCHEMA] = () => ({ _bigintMin: '-2147483648', _bigintMax: '2147483647' });
-(bigintHelpers.int64 as any)[JSON_SCHEMA] = () => ({ _bigintMin: '-9223372036854775808', _bigintMax: '9223372036854775807' });
+(bigintHelpers.int64 as any)[JSON_SCHEMA] = () => ({
+	_bigintMin: '-9223372036854775808',
+	_bigintMax: '9223372036854775807',
+});

@@ -1,6 +1,7 @@
-import { makeGuard, type Guard } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
-export interface NullishGuard<T> extends Guard<T | null | undefined> {}
+export interface NullishGuard<T> extends Guard<T | null | undefined, {}, NullishGuard<T>> {}
 export interface NullishGuardFactory {
 	<T>(guard: Guard<T>): NullishGuard<T>;
 }

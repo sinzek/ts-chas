@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, it, expect } from 'vitest';
 import { is } from '../../src/guard/index.js';
-import type { InferGuard } from '../../src/guard/shared.js';
+import type { InferGuard } from '../../src/guard/base/shared.js';
 
 // ===========================================================================
 // is.literal

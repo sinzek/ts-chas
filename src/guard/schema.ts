@@ -48,11 +48,11 @@ import {
 	evaluateFallback,
 	evaluateDefault,
 	evaluateError,
-	_registerToSchema,
 	getType,
 	buildGuardErrMsg,
-} from './shared.js';
+} from './base/shared.js';
 import { generateTerminal } from './generate.js';
+import { _registerToSchema } from './base/universal-helpers.js';
 
 /**
  * Extracts the validated output type from a schema, guard, or guard record.
@@ -68,14 +68,11 @@ import { generateTerminal } from './generate.js';
  * // { name: string }
  * ```
  */
-export type InferSchema<T> =
-	T extends Schema<infer U>
-		? U
-		: T extends (...args: any[]) => any
-			? InferGuard<T>
-			: T extends Record<string, any>
-				? { [K in keyof T]: InferInput<T[K]> }
-				: never;
+export type InferSchema<T> = T extends { $infer: infer U }
+	? U
+	: T extends Record<string, any>
+		? { [K in keyof T]: InferSchema<T[K]> }
+		: never;
 
 /**
  * A named schema with recursive validation, error collection, and Standard Schema compliance.
@@ -83,7 +80,7 @@ export type InferSchema<T> =
  * Unlike individual guard `.parse()` (which fails fast on the first error), schema `.parse()`
  * recursively walks the entire structure and collects all errors with full paths.
  */
-export interface Schema<T> {
+export interface Schema<G extends Guard<any, any, any>> {
 	/**
 	 * Recursively validates a value, collecting all errors with full dot-paths.
 	 * Returns `Result<T, GuardErr[]>` (an array of every validation failure).
@@ -98,7 +95,7 @@ export interface Schema<T> {
 	 * }
 	 * ```
 	 */
-	parse(value: unknown): Result<T, GuardErr[]>;
+	parse(value: unknown): Result<InferGuard<G>, GuardErr[]>;
 
 	/**
 	 * Validates and returns the typed value, or throws an `AggregateGuardErr`
@@ -106,12 +103,12 @@ export interface Schema<T> {
 	 *
 	 * @throws {AggregateGuardErr} If validation fails (contains `.errors: GuardErr[]`).
 	 */
-	assert(value: unknown): T;
+	assert(value: unknown): InferGuard<G>;
 
 	/**
 	 * Simple boolean type guard, delegates to the underlying guard.
 	 */
-	is(value: unknown): value is T;
+	is(value: unknown): value is InferGuard<G>;
 
 	/**
 	 * Generates `n` valid values that satisfy this schema (default: 1 → returns a single value).
@@ -126,14 +123,14 @@ export interface Schema<T> {
 	 * ```
 	 */
 	generate: {
-		(): Promise<T>;
-		(n: number): Promise<T[]>;
+		(): Promise<InferGuard<G>>;
+		(n: number): Promise<InferGuard<G>[]>;
 	};
 
 	/**
 	 * The underlying guard function for this schema.
 	 */
-	guard: Guard<T, Record<string, any>>;
+	guard: G;
 
 	/**
 	 * Schema metadata.
@@ -144,12 +141,12 @@ export interface Schema<T> {
 	 * Standard Schema V1 compliance.
 	 * Compatible with tRPC, react-hook-form, Drizzle, and other Standard Schema consumers.
 	 */
-	'~standard': StandardSchemaV1.Props<unknown, T>;
+	'~standard': StandardSchemaV1.Props<unknown, InferGuard<G>>;
 
 	/**
 	 * Helper property to infer the output type of the schema.
 	 */
-	$infer: T;
+	$infer: InferGuard<G>;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +283,12 @@ function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, pat
 	}
 
 	// Helper to handle failure and apply defaults
-	const handleFailure = (currentValue: unknown, expectedType: string, customMsg?: string) => {
+	const handleFailure = (
+		currentValue: unknown,
+		expectedType: string,
+		customMsg?: string,
+		issues?: readonly StandardSchemaV1.Issue[]
+	) => {
 		const message = evaluateError(meta.error, meta, currentValue, customMsg);
 		const error = GlobalErrs.GuardErr({
 			name: meta.name,
@@ -296,6 +298,7 @@ function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, pat
 			expected: expectedType,
 			actual: getType(currentValue),
 			values: meta.values,
+			issues,
 		});
 
 		if ('fallback' in meta) {
@@ -440,32 +443,55 @@ function validateDeep(value: unknown, guard: Guard<any>, schemaName: string, pat
 	}
 
 	// ---- Base Case: check the guard directly ----
-	if (!guard(value)) {
+	if ((meta as any)._foreignSchema) {
+		const result = (meta as any)._foreignSchema['~standard'].validate(value);
+		if (result instanceof Promise) {
+			throw new Error(
+				`[ts-chas] Standard schema "${(meta as any)._foreignSchema['~standard'].vendor}" returned a Promise during synchronous validation. ` +
+					`Standard schemas that use async refinements must be validated with .parseAsync().`
+			);
+		}
+		if (result.issues) {
+			return handleFailure(value, meta.id, undefined, result.issues);
+		}
+	} else if (!guard(value)) {
 		return handleFailure(value, meta.id);
 	}
 
-	// If it passes, we should still apply the root transform if it exists
-	return meta.transform ? meta.transform(value, value) : value;
+	// If it passes, apply the root transform if it exists.
+	// Wrap in try/catch so fallback catches transform errors.
+	if (meta.transform) {
+		try {
+			return meta.transform(value, value);
+		} catch {
+			return handleFailure(value, meta.id);
+		}
+	}
+	return value;
 }
 
 /**
  * Input to `defineSchemas`: either a Guard directly, or a plain record of guards
  * (which will be wrapped in an implicit object schema).
  */
-type SchemaInputValue = Guard<any> | { [key: string]: SchemaInputValue };
-type SchemaInput = Guard<any> | Record<string, SchemaInputValue>;
+type SchemaInputValue = Guard<any, any, any> | { [key: string]: SchemaInputValue };
+type SchemaInput = Guard<any, any, any> | Record<string, SchemaInputValue>;
 
 /**
- * Resolves a `SchemaInput` (or nested value) to its inferred TypeScript type.
+ * Resolves a `SchemaInput` (or nested value) to the corresponding guard type.
  *
- * Uses `InferGuard<T>` (which infers from the callable signature alone) instead of
- * `Guard<infer U, any>` to avoid inference failure caused by T appearing in both
- * covariant and contravariant positions in the full Guard intersection type.
+ * Discriminates guards from plain records via the `$infer` property rather than
+ * `T extends Guard<any, any, any>` — which would collapse to `T extends any` (since
+ * `Guard<any, any, any>` evaluates to `any` once the third intersection branch is `any`)
+ * and let plain records pass through unwrapped.
  */
-export type InferInput<T> = T extends (...args: any[]) => any
-	? InferGuard<T>
+import { type ObjectGuard } from './objects/object.js';
+import { type InferObjectSchema } from './objects/object-helpers.js';
+
+export type InferInput<T> = T extends { $infer: any }
+	? T
 	: T extends Record<string, any>
-		? { [K in keyof T]: InferInput<T[K]> }
+		? ObjectGuard<InferObjectSchema<{ [K in keyof T]: InferInput<T[K]> }>>
 		: never;
 
 /**
@@ -537,7 +563,7 @@ export function defineSchemas<S extends Record<string, SchemaInput>>(
  */
 export function defineSchema<T extends SchemaInput>(name: string, input: T): Schema<InferInput<T>> {
 	const guard = resolveGuard(name, input);
-	return buildSchema(name, guard);
+	return buildSchema(name, guard) as any;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,30 +624,31 @@ function resolveGuard(schemaName: string, input: SchemaInput | SchemaInputValue)
 /**
  * Builds a Schema object from a name and a guard.
  */
-function buildSchema<T>(name: string, guard: Guard<T, any>): Schema<T> {
-	const schema: Schema<T> = {
-		parse(value: unknown): Result<T, GuardErr[]> {
+function buildSchema<G extends Guard<any, any, any>>(name: string, guard: G): Schema<G> {
+	const g = guard as unknown as Guard<any>;
+	const schema: Schema<G> = {
+		parse(value: unknown): Result<InferGuard<G>, GuardErr[]> {
 			const errors: GuardErr[] = [];
-			const result = validateDeep(value, guard, name, [], errors);
+			const result = validateDeep(value, g, name, [], errors);
 
 			if (errors.length === 0) {
-				return ok(result as T);
+				return ok(result as InferGuard<G>);
 			}
 			return err(errors);
 		},
 
-		assert(value: unknown): T {
+		assert(value: unknown): InferGuard<G> {
 			const result = schema.parse(value);
 			if (result.isOk()) return result.value;
 			throw new AggregateGuardErr(name, result.error);
 		},
 
-		is(value: unknown): value is T {
-			return guard(value);
+		is(value: unknown): value is InferGuard<G> {
+			return g(value);
 		},
 
 		generate(n?: number) {
-			return generateTerminal(guard, n);
+			return generateTerminal(g, n);
 		},
 
 		guard,
@@ -631,7 +658,7 @@ function buildSchema<T>(name: string, guard: Guard<T, any>): Schema<T> {
 		'~standard': {
 			version: 1 as const,
 			vendor: 'chas',
-			validate(value: unknown): StandardSchemaV1.Result<T> {
+			validate(value: unknown): StandardSchemaV1.Result<InferGuard<G>> {
 				const result = schema.parse(value);
 				if (result.isOk()) {
 					return { value: result.value };
@@ -645,7 +672,7 @@ function buildSchema<T>(name: string, guard: Guard<T, any>): Schema<T> {
 			},
 		},
 
-		$infer: undefined as T,
+		$infer: undefined as InferGuard<G>,
 	};
 
 	return schema;

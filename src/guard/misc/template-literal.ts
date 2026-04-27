@@ -1,4 +1,5 @@
-import { makeGuard, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
 type Interpolable = string | number | bigint | boolean | null | undefined;
 type TemplatePart = string | Guard<Interpolable, any>;
@@ -8,12 +9,16 @@ type InferTemplateLiteral<T extends readonly TemplatePart[]> = T extends readonl
 	: T extends readonly [infer Head, ...infer Tail extends readonly TemplatePart[]]
 		? Head extends string
 			? `${Head}${InferTemplateLiteral<Tail>}`
-			: Head extends Guard<any>
+			: Head extends Guard<any, any, any>
 				? `${InferGuard<Head> & Interpolable}${InferTemplateLiteral<Tail>}`
 				: never
 		: string;
 
-export type TemplateLiteralGuard<T extends readonly TemplatePart[]> = Guard<InferTemplateLiteral<T>>;
+export interface TemplateLiteralGuard<T extends readonly TemplatePart[]> extends Guard<
+	InferTemplateLiteral<T>,
+	{},
+	TemplateLiteralGuard<T>
+> {}
 
 export interface TemplateLiteralGuardFactory {
 	<const T extends readonly TemplatePart[]>(...parts: T): TemplateLiteralGuard<T>;
@@ -23,7 +28,7 @@ const templateLiteralHelpers = {};
 
 export const TemplateLiteralGuardFactory: TemplateLiteralGuardFactory = (...parts: TemplatePart[]) => {
 	const regexParts: string[] = ['^'];
-	const guardIndices: { index: number; guard: Guard<any> }[] = [];
+	const guardIndices: { index: number; guard: Guard<any, any, any> }[] = [];
 	let groupIndex = 0;
 
 	for (const part of parts) {
@@ -80,7 +85,7 @@ function escapeRegex(s: string): string {
  * Maps a guard to a regex pattern for its capture group.
  * Uses greedy-but-correct patterns based on the guard's id.
  */
-function guardToPattern(guard: Guard<any>): string {
+function guardToPattern(guard: Guard<any, any, any>): string {
 	const id = guard.meta.id;
 
 	switch (id) {
@@ -129,7 +134,7 @@ function guardToPattern(guard: Guard<any>): string {
  * Coerces a captured string back to the primitive type expected by the guard,
  * so that the guard can validate it correctly.
  */
-function coerceCapture(captured: string, guard: Guard<any>): unknown {
+function coerceCapture(captured: string, guard: Guard<any, any, any>): unknown {
 	const id = guard.meta.id;
 
 	switch (id) {

@@ -1,8 +1,9 @@
-import { makeGuard, type Guard } from '../shared.js';
+import { type Guard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
-export interface UndefinedGuard extends Guard<undefined, typeof undefinedHelpers> {}
-export interface VoidGuard extends Guard<void, typeof undefinedHelpers> {}
-export interface OptionalGuard<T> extends Guard<T | undefined, typeof undefinedHelpers> {}
+export interface UndefinedGuard extends Guard<undefined, {}, UndefinedGuard> {}
+export interface VoidGuard extends Guard<void, {}, VoidGuard> {}
+export interface OptionalGuard<T> extends Guard<T | undefined, {}, OptionalGuard<T>> {}
 export interface OptionalGuardFactory {
 	<T>(guard: Guard<T>): OptionalGuard<T>;
 }
@@ -16,13 +17,13 @@ export const UndefinedGuard: UndefinedGuard = makeGuard(
 		id: 'undefined',
 	},
 	undefinedHelpers
-);
+) as any;
 
 export const VoidGuard: VoidGuard = makeGuard(
 	(v: unknown): v is void => v === undefined,
 	{ name: 'void', id: 'void' },
 	undefinedHelpers
-);
+) as any;
 
 export const OptionalGuardFactory: OptionalGuardFactory = <T>(guard: Guard<T>) => {
 	return makeGuard((v: unknown): v is T | undefined => v === undefined || guard(v), {

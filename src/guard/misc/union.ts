@@ -1,9 +1,10 @@
-import { makeGuard, type Guard, type InferGuard } from '../shared.js';
+import { type Guard, type InferGuard } from '../base/shared.js';
+import { makeGuard } from '../base/proxy.js';
 
-export type UnionGuard<T extends Guard<any, any>[]> = Guard<InferGuard<T[number]>, typeof unionHelpers>;
+export interface UnionGuard<T> extends Guard<T, {}, UnionGuard<T>> {}
 
 export interface UnionGuardFactory {
-	<T extends Guard<any, any>[]>(...guards: T): UnionGuard<T>;
+	<T extends Guard<any, any, any>[]>(...guards: T): UnionGuard<InferGuard<T[number]>>;
 }
 
 const unionHelpers = {};
